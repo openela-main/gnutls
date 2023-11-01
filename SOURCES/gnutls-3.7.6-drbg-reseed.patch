@@ -1,0 +1,41 @@
+From 3035e884b3abc68bcebff5adec5bd8819bbc6d7b Mon Sep 17 00:00:00 2001
+From: rpm-build <rpm-build>
+Date: Fri, 5 Aug 2022 16:16:42 +0900
+Subject: [PATCH] gnutls-3.7.6-drbg-reseed.patch
+
+Signed-off-by: rpm-build <rpm-build>
+---
+ lib/nettle/sysrng-linux.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/lib/nettle/sysrng-linux.c b/lib/nettle/sysrng-linux.c
+index 6b3971c..dae9061 100644
+--- a/lib/nettle/sysrng-linux.c
++++ b/lib/nettle/sysrng-linux.c
+@@ -31,6 +31,9 @@
+ # include <num.h>
+ # include <errno.h>
+ # include <rnd-common.h>
++# include "fips.h"
++#else
++# define _gnutls_fips_mode_enabled() 0
+ #endif
+ 
+ #include <sys/types.h>
+@@ -103,7 +106,12 @@ static int force_getrandom(void *buf, size_t buflen, unsigned int flags)
+ static int _rnd_get_system_entropy_getrandom(void* _rnd, size_t size)
+ {
+ 	int ret;
+-	ret = force_getrandom(_rnd, size, 0);
++	unsigned int flags = 0;
++
++	if (_gnutls_fips_mode_enabled()) {
++		flags |= 2/*GRND_RANDOM*/;
++	}
++	ret = force_getrandom(_rnd, size, flags);
+ 	if (ret == -1) {
+ 		int e = errno;
+ 		gnutls_assert();
+-- 
+2.37.1
+

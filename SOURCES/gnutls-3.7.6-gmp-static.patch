@@ -1,0 +1,175 @@
+From: Daiki Ueno <ueno@gnu.org>
+Date: Fri, 19 Aug 2022 12:32:27 +0900
+Subject: [PATCH] build: allow GMP to be statically linked
+
+Even though we set the custom allocator[1] to zeroize sensitive data,
+it can be easily invalidated if the application sets its own custom
+allocator.  An approach to prevent that is to link against a static
+library of GMP, so the use of GMP is privatized and the custom
+allocator configuration is not shared with other applications.
+
+This patch allows libgnutls to be linked with the static library of
+GMP.  Note that, to this work libgmp.a needs to be compiled with -fPIC
+and libhogweed in Nettle is also linked to the static library of GMP.
+
+1. https://gitlab.com/gnutls/gnutls/-/merge_requests/1554
+
+Signed-off-by: Daiki Ueno <ueno@gnu.org>
+---
+diff --color -ruNp a/configure.ac b/configure.ac
+--- a/configure.ac	2022-12-15 11:06:16.782726043 +0100
++++ b/configure.ac	2022-12-15 11:08:35.603451427 +0100
+@@ -744,6 +744,8 @@ AC_CHECK_FUNCS(nettle_cmac_kuznyechik_up
+ LIBS=$save_LIBS
+ 
+ # Check sonames of the linked libraries needed for FIPS selftests.
++save_CFLAGS=$CFLAGS
++CFLAGS="$CFLAGS $GMP_CFLAGS"
+ save_LIBS=$LIBS
+ LIBS="$LIBS $GMP_LIBS"
+ AC_MSG_CHECKING([gmp soname])
+@@ -757,9 +759,14 @@ if test -z "$gmp_so"; then
+ 	gmp_so=none
+ fi
+ AC_MSG_RESULT($gmp_so)
+-AC_DEFINE_UNQUOTED([GMP_LIBRARY_SONAME], ["$gmp_so"], [The soname of gmp library])
++if test "$gmp_so" != none; then
++	AC_DEFINE_UNQUOTED([GMP_LIBRARY_SONAME], ["$gmp_so"], [The soname of gmp library])
++fi
+ LIBS=$save_LIBS
++CFLAGS=$save_CFLAGS
+ 
++save_CFLAGS=$CFLAGS
++CFLAGS="$CFLAGS $NETTLE_CFLAGS"
+ save_LIBS=$LIBS
+ LIBS="$LIBS $NETTLE_LIBS"
+ AC_MSG_CHECKING([nettle soname])
+@@ -775,7 +782,11 @@ fi
+ AC_MSG_RESULT($nettle_so)
+ AC_DEFINE_UNQUOTED([NETTLE_LIBRARY_SONAME], ["$nettle_so"], [The soname of nettle library])
+ LIBS=$save_LIBS
++CFLAGS=$save_CFLAGS
+ 
++save_CFLAGS=$CFLAGS
++# <nettle/bignum.h> includes <gmp.h>
++CFLAGS="$CFLAGS $HOGWEED_CFLAGS $GMP_CFLAGS"
+ save_LIBS=$LIBS
+ LIBS="$LIBS $HOGWEED_LIBS"
+ AC_MSG_CHECKING([hogweed soname])
+@@ -791,6 +802,7 @@ fi
+ AC_MSG_RESULT($hogweed_so)
+ AC_DEFINE_UNQUOTED([HOGWEED_LIBRARY_SONAME], ["$hogweed_so"], [The soname of hogweed library])
+ LIBS=$save_LIBS
++CFLAGS=$save_CFLAGS
+ 
+ gnutls_so=libgnutls.so.`expr "$LT_CURRENT" - "$LT_AGE"`
+ AC_DEFINE_UNQUOTED([GNUTLS_LIBRARY_SONAME], ["$gnutls_so"], [The soname of gnutls library])
+diff --color -ruNp a/lib/fips.c b/lib/fips.c
+--- a/lib/fips.c	2022-12-15 11:06:16.868727731 +0100
++++ b/lib/fips.c	2022-12-15 11:12:42.744303409 +0100
+@@ -155,7 +155,11 @@ void _gnutls_fips_mode_reset_zombie(void
+ #define GNUTLS_LIBRARY_NAME GNUTLS_LIBRARY_SONAME
+ #define NETTLE_LIBRARY_NAME NETTLE_LIBRARY_SONAME
+ #define HOGWEED_LIBRARY_NAME HOGWEED_LIBRARY_SONAME
++
++/* GMP can be statically linked */
++#ifdef GMP_LIBRARY_SONAME
+ #define GMP_LIBRARY_NAME GMP_LIBRARY_SONAME
++#endif
+ 
+ #define HMAC_SIZE 32
+ #define HMAC_ALGO GNUTLS_MAC_SHA256
+@@ -173,7 +177,9 @@ struct hmac_file
+ 	struct hmac_entry gnutls;
+ 	struct hmac_entry nettle;
+ 	struct hmac_entry hogweed;
++#ifdef GMP_LIBRARY_SONAME
+ 	struct hmac_entry gmp;
++#endif
+ };
+ 
+ struct lib_paths
+@@ -181,7 +187,9 @@ struct lib_paths
+ 	char gnutls[GNUTLS_PATH_MAX];
+ 	char nettle[GNUTLS_PATH_MAX];
+ 	char hogweed[GNUTLS_PATH_MAX];
++#ifdef GMP_LIBRARY_SONAME
+ 	char gmp[GNUTLS_PATH_MAX];
++#endif
+ };
+ 
+ /*
+@@ -245,8 +253,10 @@ static int handler(void *user, const cha
+ 		return lib_handler(&p->nettle, section, name, value);
+ 	} else if (!strcmp(section, HOGWEED_LIBRARY_NAME)) {
+ 		return lib_handler(&p->hogweed, section, name, value);
++#ifdef GMP_LIBRARY_SONAME
+ 	} else if (!strcmp(section, GMP_LIBRARY_NAME)) {
+ 		return lib_handler(&p->gmp, section, name, value);
++#endif
+ 	} else {
+ 		return 0;
+ 	}
+@@ -389,8 +399,10 @@ static int callback(struct dl_phdr_info
+ 		_gnutls_str_cpy(paths->nettle, GNUTLS_PATH_MAX, path);
+ 	else if (!strcmp(soname, HOGWEED_LIBRARY_SONAME))
+ 		_gnutls_str_cpy(paths->hogweed, GNUTLS_PATH_MAX, path);
++#ifdef GMP_LIBRARY_SONAME
+ 	else if (!strcmp(soname, GMP_LIBRARY_SONAME))
+ 		_gnutls_str_cpy(paths->gmp, GNUTLS_PATH_MAX, path);
++#endif
+ 	return 0;
+ }
+ 
+@@ -411,10 +423,12 @@ static int load_lib_paths(struct lib_pat
+ 		_gnutls_debug_log("Hogweed library path was not found\n");
+ 		return gnutls_assert_val(GNUTLS_E_FILE_ERROR);
+ 	}
++#ifdef GMP_LIBRARY_SONAME
+ 	if (paths->gmp[0] == '\0') {
+ 		_gnutls_debug_log("Gmp library path was not found\n");
+ 		return gnutls_assert_val(GNUTLS_E_FILE_ERROR);
+ 	}
++#endif
+ 
+ 	return GNUTLS_E_SUCCESS;
+ }
+@@ -467,9 +481,11 @@ static int check_binary_integrity(void)
+ 	ret = check_lib_hmac(&hmac.hogweed, paths.hogweed);
+ 	if (ret < 0)
+ 		return ret;
++#ifdef GMP_LIBRARY_SONAME
+ 	ret = check_lib_hmac(&hmac.gmp, paths.gmp);
+ 	if (ret < 0)
+ 		return ret;
++#endif
+ 
+ 	return 0;
+ }
+diff --color -ruNp a/lib/fipshmac.c b/lib/fipshmac.c
+--- a/lib/fipshmac.c	2022-12-15 11:06:16.785726102 +0100
++++ b/lib/fipshmac.c	2022-12-15 11:13:34.533320156 +0100
+@@ -107,8 +107,10 @@ static int callback(struct dl_phdr_info
+ 		return print_lib(path, soname);
+ 	if (!strcmp(soname, HOGWEED_LIBRARY_SONAME))
+ 		return print_lib(path, soname);
++#ifdef GMP_LIBRARY_SONAME
+ 	if (!strcmp(soname, GMP_LIBRARY_SONAME))
+ 		return print_lib(path, soname);
++#endif
+         return 0;
+ }
+ 
+diff --color -ruNp a/lib/global.c b/lib/global.c
+--- a/lib/global.c	2022-12-15 11:06:16.061711888 +0100
++++ b/lib/global.c	2022-12-15 11:08:35.604451446 +0100
+@@ -540,7 +540,9 @@ static const struct gnutls_library_confi
+ 	{ "libgnutls-soname", GNUTLS_LIBRARY_SONAME },
+ 	{ "libnettle-soname", NETTLE_LIBRARY_SONAME },
+ 	{ "libhogweed-soname", HOGWEED_LIBRARY_SONAME },
++#ifdef GMP_LIBRARY_SONAME
+ 	{ "libgmp-soname", GMP_LIBRARY_SONAME },
++#endif
+ 	{ "hardware-features", HW_FEATURES },
+ 	{ "tls-features", TLS_FEATURES },
+ 	{ NULL, NULL }

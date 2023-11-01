@@ -1,0 +1,29 @@
+From 0a29639ad24072afbd79b2ceede9976e51b9e2af Mon Sep 17 00:00:00 2001
+From: rpm-build <rpm-build>
+Date: Fri, 1 Jul 2022 16:46:07 +0900
+Subject: [PATCH] fips: don't run POST for DSA
+
+Signed-off-by: rpm-build <<rpm-build>>
+---
+ lib/fips.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/lib/fips.c b/lib/fips.c
+index 656d43e..c776690 100644
+--- a/lib/fips.c
++++ b/lib/fips.c
+@@ -523,11 +523,6 @@ int _gnutls_fips_perform_self_checks2(void)
+ 		return gnutls_assert_val(GNUTLS_E_SELF_TEST_ERROR);
+ 	}
+ 
+-	ret = gnutls_pk_self_test(0, GNUTLS_PK_DSA);
+-	if (ret < 0) {
+-		return gnutls_assert_val(GNUTLS_E_SELF_TEST_ERROR);
+-	}
+-
+ 	ret = gnutls_pk_self_test(0, GNUTLS_PK_EC);
+ 	if (ret < 0) {
+ 		return gnutls_assert_val(GNUTLS_E_SELF_TEST_ERROR);
+-- 
+2.36.1
+
