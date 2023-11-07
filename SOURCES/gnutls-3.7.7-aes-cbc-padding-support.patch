@@ -1,0 +1,433 @@
+diff --color -ruNp a/doc/Makefile.am b/doc/Makefile.am
+--- a/doc/Makefile.am	2022-11-15 14:14:10.632725399 +0100
++++ b/doc/Makefile.am	2022-11-15 14:14:40.252300863 +0100
+@@ -575,6 +575,7 @@ ENUMS += enums/gnutls_certificate_verifi
+ ENUMS += enums/gnutls_certificate_verify_flags
+ ENUMS += enums/gnutls_channel_binding_t
+ ENUMS += enums/gnutls_cipher_algorithm_t
++ENUMS += enums/gnutls_cipher_flags_t
+ ENUMS += enums/gnutls_close_request_t
+ ENUMS += enums/gnutls_compression_method_t
+ ENUMS += enums/gnutls_credentials_type_t
+@@ -882,12 +883,16 @@ FUNCS += functions/gnutls_cipher_decrypt
+ FUNCS += functions/gnutls_cipher_decrypt.short
+ FUNCS += functions/gnutls_cipher_decrypt2
+ FUNCS += functions/gnutls_cipher_decrypt2.short
++FUNCS += functions/gnutls_cipher_decrypt3
++FUNCS += functions/gnutls_cipher_decrypt3.short
+ FUNCS += functions/gnutls_cipher_deinit
+ FUNCS += functions/gnutls_cipher_deinit.short
+ FUNCS += functions/gnutls_cipher_encrypt
+ FUNCS += functions/gnutls_cipher_encrypt.short
+ FUNCS += functions/gnutls_cipher_encrypt2
+ FUNCS += functions/gnutls_cipher_encrypt2.short
++FUNCS += functions/gnutls_cipher_encrypt3
++FUNCS += functions/gnutls_cipher_encrypt3.short
+ FUNCS += functions/gnutls_cipher_get
+ FUNCS += functions/gnutls_cipher_get.short
+ FUNCS += functions/gnutls_cipher_get_block_size
+diff --color -ruNp a/doc/manpages/Makefile.am b/doc/manpages/Makefile.am
+--- a/doc/manpages/Makefile.am	2022-11-15 14:14:10.634725438 +0100
++++ b/doc/manpages/Makefile.am	2022-11-15 14:14:40.254300902 +0100
+@@ -273,9 +273,11 @@ APIMANS += gnutls_check_version.3
+ APIMANS += gnutls_cipher_add_auth.3
+ APIMANS += gnutls_cipher_decrypt.3
+ APIMANS += gnutls_cipher_decrypt2.3
++APIMANS += gnutls_cipher_decrypt3.3
+ APIMANS += gnutls_cipher_deinit.3
+ APIMANS += gnutls_cipher_encrypt.3
+ APIMANS += gnutls_cipher_encrypt2.3
++APIMANS += gnutls_cipher_encrypt3.3
+ APIMANS += gnutls_cipher_get.3
+ APIMANS += gnutls_cipher_get_block_size.3
+ APIMANS += gnutls_cipher_get_id.3
+diff --color -ruNp a/lib/crypto-api.c b/lib/crypto-api.c
+--- a/lib/crypto-api.c	2022-11-15 14:14:11.036733248 +0100
++++ b/lib/crypto-api.c	2022-11-15 14:14:40.255300921 +0100
+@@ -413,6 +413,166 @@ gnutls_cipher_decrypt2(gnutls_cipher_hd_
+ }
+ 
+ /**
++ * gnutls_cipher_encrypt3:
++ * @handle: is a #gnutls_cipher_hd_t type
++ * @ptext: the data to encrypt
++ * @ptext_len: the length of data to encrypt
++ * @ctext: the encrypted data
++ * @ctext_len: the length of encrypted data (initially must hold the maximum available size)
++ * @flags: flags for padding
++ *
++ * This function will encrypt the given data using the algorithm
++ * specified by the context. For block ciphers, @ptext_len is
++ * typically a multiple of the block size. If not, the caller can
++ * instruct the function to pad the last block according to @flags.
++ * Currently, the only available padding scheme is
++ * %GNUTLS_CIPHER_PADDING_PKCS7.
++ *
++ * If @ctext is not %NULL, it must hold enough space to store
++ * resulting cipher text. To check the required size, this function
++ * can be called with @ctext set to %NULL. Then @ctext_len will be
++ * updated without performing actual encryption.
++ *
++ * Returns: Zero or a negative error code on error.
++ *
++ * Since: 3.7.7
++ **/
++int
++gnutls_cipher_encrypt3(gnutls_cipher_hd_t handle,
++		       const void *ptext, size_t ptext_len,
++		       void *ctext, size_t *ctext_len,
++		       unsigned flags)
++{
++	api_cipher_hd_st *h = handle;
++	const cipher_entry_st *e = h->ctx_enc.e;
++	int block_size = _gnutls_cipher_get_block_size(e);
++	int ret = 0;
++
++	if (unlikely(ctext_len == NULL)) {
++		return gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
++	}
++
++	if (_gnutls_cipher_type(e) == CIPHER_BLOCK &&
++	    (flags & GNUTLS_CIPHER_PADDING_PKCS7)) {
++		size_t n, r;
++		uint8_t last_block[MAX_CIPHER_BLOCK_SIZE];
++		const uint8_t *p = ptext;
++		uint8_t *c = ctext;
++
++		if (!INT_ADD_OK(ptext_len, block_size, &n)) {
++			return gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
++		}
++
++		n = (n / block_size) * block_size;
++
++		if (!ctext) {
++			*ctext_len = n;
++			return 0;
++		}
++
++		if (*ctext_len < n) {
++			return gnutls_assert_val(GNUTLS_E_SHORT_MEMORY_BUFFER);
++		}
++
++		/* Encrypt up to the last complete block */
++		r = ptext_len % block_size;
++
++		ret = _gnutls_cipher_encrypt2(&h->ctx_enc,
++					      ptext, ptext_len - r,
++					      ctext, ptext_len - r);
++		if (ret < 0) {
++			goto error;
++		}
++
++		/* Encrypt the last block with padding */
++		gnutls_memset(last_block, block_size - r, sizeof(last_block));
++		if (r > 0) {
++			memcpy(last_block, &p[ptext_len - r], r);
++		}
++		ret = _gnutls_cipher_encrypt2(&h->ctx_enc,
++					      last_block, block_size,
++					      &c[ptext_len - r], block_size);
++		if (ret < 0) {
++			goto error;
++		}
++		*ctext_len = n;
++	} else {
++		if (!ctext) {
++			*ctext_len = ptext_len;
++			return 0;
++		}
++
++		ret = _gnutls_cipher_encrypt2(&h->ctx_enc, ptext, ptext_len,
++					      ctext, *ctext_len);
++		if (ret < 0) {
++			goto error;
++		}
++		*ctext_len = ptext_len;
++	}
++
++ error:
++	if (ret < 0) {
++		_gnutls_switch_fips_state(GNUTLS_FIPS140_OP_ERROR);
++	} else {
++		_gnutls_switch_fips_state(GNUTLS_FIPS140_OP_APPROVED);
++	}
++	return ret;
++}
++
++/**
++ * gnutls_cipher_decrypt3:
++ * @handle: is a #gnutls_cipher_hd_t type
++ * @ctext: the data to decrypt
++ * @ctext_len: the length of data to decrypt
++ * @ptext: the decrypted data
++ * @ptext_len: the available length for decrypted data
++ * @flags: flags for padding
++ *
++ * This function will decrypt the given data using the algorithm
++ * specified by the context. If @flags is specified, padding for the
++ * decrypted data will be removed accordingly and @ptext_len will be
++ * updated.
++ *
++ * Returns: Zero or a negative error code on error.
++ *
++ * Since: 3.7.7
++ **/
++int
++gnutls_cipher_decrypt3(gnutls_cipher_hd_t handle,
++		       const void *ctext, size_t ctext_len,
++		       void *ptext, size_t *ptext_len,
++		       unsigned flags)
++{
++	api_cipher_hd_st *h = handle;
++	int ret;
++
++	ret = gnutls_cipher_decrypt2(handle,
++				     ctext, ctext_len,
++				     ptext, *ptext_len);
++	if (ret < 0) {
++		return ret;
++	}
++
++	if (_gnutls_cipher_type(h->ctx_enc.e) == CIPHER_BLOCK &&
++	    (flags & GNUTLS_CIPHER_PADDING_PKCS7)) {
++		uint8_t *p = ptext;
++		uint8_t padding = p[*ptext_len - 1];
++		if (!padding || padding > _gnutls_cipher_get_block_size(h->ctx_enc.e)) {
++			return gnutls_assert_val(GNUTLS_E_DECRYPTION_FAILED);
++		}
++		/* Check that the prior bytes are all PADDING */
++		for (size_t i = *ptext_len - padding; i < *ptext_len; i++) {
++			if (padding != p[*ptext_len - 1]) {
++				return gnutls_assert_val(GNUTLS_E_DECRYPTION_FAILED);
++			}
++		}
++		*ptext_len -= padding;
++	}
++
++	return 0;
++}
++
++/**
+  * gnutls_cipher_deinit:
+  * @handle: is a #gnutls_cipher_hd_t type
+  *
+diff --color -ruNp a/lib/includes/gnutls/crypto.h b/lib/includes/gnutls/crypto.h
+--- a/lib/includes/gnutls/crypto.h	2022-05-10 13:57:43.000000000 +0200
++++ b/lib/includes/gnutls/crypto.h	2022-11-15 14:14:40.256300941 +0100
+@@ -49,6 +49,28 @@ int gnutls_cipher_encrypt2(gnutls_cipher
+ 			   const void *text, size_t textlen,
+ 			   void *ciphertext, size_t ciphertextlen);
+ 
++/**
++ * gnutls_cipher_flags_t:
++ * @GNUTLS_CIPHER_PADDING_PKCS7: Flag to indicate PKCS#7 padding
++ *
++ * Enumeration of flags to control block cipher padding, used by
++ * gnutls_cipher_encrypt3() and gnutls_cipher_decrypt3().
++ *
++ * Since: 3.7.7
++ */
++typedef enum gnutls_cipher_flags_t {
++	GNUTLS_CIPHER_PADDING_PKCS7 = 1
++} gnutls_cipher_flags_t;
++
++int gnutls_cipher_encrypt3(gnutls_cipher_hd_t handle,
++			   const void *ptext, size_t ptext_len,
++			   void *ctext, size_t *ctext_len,
++			   unsigned flags);
++int gnutls_cipher_decrypt3(gnutls_cipher_hd_t handle,
++			   const void *ctext, size_t ctext_len,
++			   void *ptext, size_t *ptext_len,
++			   unsigned flags);
++
+ void gnutls_cipher_set_iv(gnutls_cipher_hd_t handle, void *iv,
+ 			  size_t ivlen);
+ 
+diff --color -ruNp a/lib/libgnutls.map b/lib/libgnutls.map
+--- a/lib/libgnutls.map	2022-11-15 14:14:11.142735308 +0100
++++ b/lib/libgnutls.map	2022-11-15 14:14:40.256300941 +0100
+@@ -1403,6 +1403,8 @@ GNUTLS_3_7_7
+ {
+  global:
+ 	gnutls_fips140_run_self_tests;
++	gnutls_cipher_encrypt3;
++	gnutls_cipher_decrypt3;
+  local:
+ 	*;
+ } GNUTLS_3_7_5;
+diff --color -ruNp a/tests/cipher-padding.c b/tests/cipher-padding.c
+--- a/tests/cipher-padding.c	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/cipher-padding.c	2022-11-15 14:14:40.258300980 +0100
+@@ -0,0 +1,160 @@
++/*
++ * Copyright (C) 2022 Red Hat, Inc.
++ *
++ * Author: Daiki Ueno
++ *
++ * This file is part of GnuTLS.
++ *
++ * The GnuTLS is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public License
++ * as published by the Free Software Foundation; either version 2.1 of
++ * the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>
++ *
++ */
++
++#include <config.h>
++
++#include <gnutls/crypto.h>
++#include <limits.h>
++#include <stdint.h>
++#include <stdio.h>
++#include "utils.h"
++
++static void tls_log_func(int level, const char *str)
++{
++	fprintf(stderr, "<%d>| %s", level, str);
++}
++
++#define CLAMP(x, b) (((x) + (b)) / (b)) * (b)
++
++static void
++start(gnutls_cipher_algorithm_t algo, size_t plaintext_size, unsigned int flags)
++{
++	int ret;
++	gnutls_cipher_hd_t ch;
++	uint8_t key16[64];
++	uint8_t iv16[32];
++	uint8_t plaintext[128];
++	uint8_t ciphertext[128];
++	size_t block_size;
++	size_t size;
++	gnutls_datum_t key, iv;
++
++	success("%s %zu %u\n",
++		gnutls_cipher_get_name(algo), plaintext_size, flags);
++
++	block_size = gnutls_cipher_get_block_size(algo);
++
++	key.data = key16;
++	key.size = gnutls_cipher_get_key_size(algo);
++	assert(key.size <= sizeof(key16));
++
++	iv.data = iv16;
++	iv.size = gnutls_cipher_get_iv_size(algo);
++	assert(iv.size <= sizeof(iv16));
++
++	memset(iv.data, 0xff, iv.size);
++	memset(key.data, 0xfe, key.size);
++	memset(plaintext, 0xfa, sizeof(plaintext));
++
++	ret = gnutls_cipher_init(&ch, algo, &key, &iv);
++	if (ret < 0) {
++		fail("gnutls_cipher_init failed\n");
++	}
++
++	/* Check overflow if PKCS#7 is requested */
++	if (flags & GNUTLS_CIPHER_PADDING_PKCS7) {
++		ret = gnutls_cipher_encrypt3(ch,
++					     plaintext, SIZE_MAX,
++					     NULL, &size,
++					     flags);
++		if (ret != GNUTLS_E_INVALID_REQUEST) {
++			fail("gnutls_cipher_encrypt3 succeeded\n");
++		}
++	}
++
++	/* Get the ciphertext size */
++	ret = gnutls_cipher_encrypt3(ch,
++				     plaintext, plaintext_size,
++				     NULL, &size,
++				     flags);
++	if (ret < 0) {
++		fail("gnutls_cipher_encrypt3 failed\n");
++	}
++
++	if (flags & GNUTLS_CIPHER_PADDING_PKCS7) {
++		if (size <= plaintext_size) {
++			fail("no padding appended\n");
++		}
++		if (size != CLAMP(plaintext_size, block_size)) {
++			fail("size does not match: %zu (expected %zu)\n",
++			     size, CLAMP(plaintext_size, block_size));
++		}
++	} else {
++		if (size != plaintext_size) {
++			fail("size does not match: %zu (expected %zu)\n",
++			     size, plaintext_size);
++		}
++	}
++
++	/* Encrypt with padding */
++	ret = gnutls_cipher_encrypt3(ch,
++				     plaintext, plaintext_size,
++				     ciphertext, &size,
++				     flags);
++	if (ret < 0) {
++		fail("gnutls_cipher_encrypt3 failed\n");
++	}
++
++	/* Decrypt with padding */
++	ret = gnutls_cipher_decrypt3(ch,
++				     ciphertext, size,
++				     ciphertext, &size,
++				     flags);
++	if (ret < 0) {
++		fail("gnutls_cipher_encrypt3 failed\n");
++	}
++
++	if (size != plaintext_size) {
++		fail("size does not match: %zu (expected %zu)\n",
++		     size, plaintext_size);
++	}
++
++	if (memcmp(ciphertext, plaintext, size) != 0) {
++		fail("plaintext does not match\n");
++	}
++
++	gnutls_cipher_deinit(ch);
++}
++
++void doit(void) {
++	int ret;
++
++	gnutls_global_set_log_function(tls_log_func);
++	if (debug) {
++		gnutls_global_set_log_level(4711);
++	}
++
++	ret = global_init();
++	if (ret < 0) {
++		fail("Cannot initialize library\n");
++	}
++
++	start(GNUTLS_CIPHER_AES_128_CBC, 0, GNUTLS_CIPHER_PADDING_PKCS7);
++	start(GNUTLS_CIPHER_AES_128_CBC, 11, GNUTLS_CIPHER_PADDING_PKCS7);
++	start(GNUTLS_CIPHER_AES_128_CBC, 77, GNUTLS_CIPHER_PADDING_PKCS7);
++	start(GNUTLS_CIPHER_AES_128_CBC, 80, GNUTLS_CIPHER_PADDING_PKCS7);
++
++	start(GNUTLS_CIPHER_AES_128_CBC, 0, 0);
++	start(GNUTLS_CIPHER_AES_128_CBC, 80, 0);
++
++	gnutls_global_deinit();
++}
+diff --color -ruNp a/tests/Makefile.am b/tests/Makefile.am
+--- a/tests/Makefile.am	2022-11-15 14:14:11.144735347 +0100
++++ b/tests/Makefile.am	2022-11-15 14:14:40.257300960 +0100
+@@ -233,7 +233,7 @@ ctests += mini-record-2 simple gnutls_hm
+ 	 tls13-without-timeout-func buffer status-request-revoked \
+ 	 set_x509_ocsp_multi_cli kdf-api keylog-func handshake-write \
+ 	 x509cert-dntypes id-on-xmppAddr tls13-compat-mode ciphersuite-name \
+-	 x509-upnconstraint xts-key-check pkcs7-verify-double-free \
++	 x509-upnconstraint cipher-padding xts-key-check pkcs7-verify-double-free \
+ 	 fips-rsa-sizes tls12-rehandshake-ticket
+ 
+ ctests += tls-channel-binding

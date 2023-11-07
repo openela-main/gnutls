@@ -1,0 +1,32 @@
+From 36a92d984020df16296784a7ad613c9693469d23 Mon Sep 17 00:00:00 2001
+From: rpm-build <rpm-build>
+Date: Tue, 21 Dec 2021 16:28:09 +0100
+Subject: [PATCH 1/2] Remove GNUTLS_NO_EXPLICIT_INIT compatibility
+
+Signed-off-by: rpm-build <rpm-build>
+---
+ lib/global.c | 8 --------
+ 1 file changed, 8 deletions(-)
+
+diff --git a/lib/global.c b/lib/global.c
+index 3731418..1384045 100644
+--- a/lib/global.c
++++ b/lib/global.c
+@@ -500,14 +500,6 @@ static void _CONSTRUCTOR lib_init(void)
+ 			return;
+ 	}
+ 
+-	e = secure_getenv("GNUTLS_NO_EXPLICIT_INIT");
+-	if (e != NULL) {
+-		_gnutls_debug_log("GNUTLS_NO_EXPLICIT_INIT is deprecated; use GNUTLS_NO_IMPLICIT_INIT\n");
+-		ret = atoi(e);
+-		if (ret == 1)
+-			return;
+-	}
+-
+ 	ret = _gnutls_global_init(1);
+ 	if (ret < 0) {
+ 		fprintf(stderr, "Error in GnuTLS initialization: %s\n", gnutls_strerror(ret));
+-- 
+2.31.1
+

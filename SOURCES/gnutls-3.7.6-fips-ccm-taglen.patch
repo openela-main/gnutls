@@ -1,0 +1,331 @@
+From 26b2caef673aba8bfd10db3b1b8117f941c18e58 Mon Sep 17 00:00:00 2001
+From: Daiki Ueno <ueno@gnu.org>
+Date: Fri, 21 Oct 2022 15:48:39 +0900
+Subject: [PATCH] cipher: add restriction on CCM tag length under FIPS mode
+
+This change prohibits any use of tag length other than 4, 6, 8, 10,
+12, 14, and 16 bytes in CCM used under FIPS mode, in accordance with
+SP800-38C A.1.  While use of tag lengths smaller than 8 bytes is not
+recommended, we simply allow 4 and 6 bytes tags for now.
+
+Signed-off-by: Daiki Ueno <ueno@gnu.org>
+---
+ lib/accelerated/aarch64/aes-ccm-aarch64.c | 39 ++++++++++
+ lib/accelerated/x86/aes-ccm-x86-aesni.c   | 39 ++++++++++
+ lib/nettle/cipher.c                       | 55 ++++++++++++++
+ tests/fips-test.c                         | 87 ++++++++++++++++++++++-
+ 4 files changed, 218 insertions(+), 2 deletions(-)
+
+diff --git a/lib/accelerated/aarch64/aes-ccm-aarch64.c b/lib/accelerated/aarch64/aes-ccm-aarch64.c
+index a2ba259e99..b415d4ddfb 100644
+--- a/lib/accelerated/aarch64/aes-ccm-aarch64.c
++++ b/lib/accelerated/aarch64/aes-ccm-aarch64.c
+@@ -36,6 +36,7 @@
+ #include <byteswap.h>
+ #include <nettle/ccm.h>
+ #include <aes-aarch64.h>
++#include <fips.h>
+ 
+ typedef struct ccm_aarch64_aes_ctx {
+ 	AES_KEY key;
+@@ -103,6 +104,25 @@ aes_ccm_aead_encrypt(void *_ctx,
+ 	if (unlikely(encr_size < plain_size + tag_size))
+ 		return gnutls_assert_val(GNUTLS_E_SHORT_MEMORY_BUFFER);
+ 
++	/* SP800-38C A.1 says Tlen must be a multiple of 16 between 32
++	 * and 128.
++	 */
++	switch (tag_size) {
++	case 4: case 6:
++		/* SP800-38C B.2 says Tlen smaller than 64 should not be used
++		 * under sufficient restriction. We simply allow those for now.
++		 */
++		FALLTHROUGH;
++	case 8: case 10: case 12: case 14: case 16:
++		break;
++	default:
++		if (_gnutls_fips_mode_enabled()) {
++			_gnutls_switch_fips_state(GNUTLS_FIPS140_OP_ERROR);
++			return gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
++		}
++		break;
++	}
++
+ 	ccm_encrypt_message(&ctx->key, aarch64_aes_encrypt,
+ 			    nonce_size, nonce,
+ 			    auth_size, auth,
+@@ -129,6 +149,25 @@ aes_ccm_aead_decrypt(void *_ctx,
+ 	if (unlikely(plain_size < encr_size - tag_size))
+ 		return gnutls_assert_val(GNUTLS_E_SHORT_MEMORY_BUFFER);
+ 
++	/* SP800-38C A.1 says Tlen must be a multiple of 16 between 32
++	 * and 128.
++	 */
++	switch (tag_size) {
++	case 4: case 6:
++		/* SP800-38C B.2 says Tlen smaller than 64 should not be used
++		 * under sufficient restriction. We simply allow those for now.
++		 */
++		FALLTHROUGH;
++	case 8: case 10: case 12: case 14: case 16:
++		break;
++	default:
++		if (_gnutls_fips_mode_enabled()) {
++			_gnutls_switch_fips_state(GNUTLS_FIPS140_OP_ERROR);
++			return gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
++		}
++		break;
++	}
++
+ 	ret = ccm_decrypt_message(&ctx->key, aarch64_aes_encrypt,
+ 				  nonce_size, nonce,
+ 				  auth_size, auth,
+diff --git a/lib/accelerated/x86/aes-ccm-x86-aesni.c b/lib/accelerated/x86/aes-ccm-x86-aesni.c
+index 701c0f992a..9ebbdd7b2a 100644
+--- a/lib/accelerated/x86/aes-ccm-x86-aesni.c
++++ b/lib/accelerated/x86/aes-ccm-x86-aesni.c
+@@ -37,6 +37,7 @@
+ #include <byteswap.h>
+ #include <nettle/ccm.h>
+ #include <aes-x86.h>
++#include <fips.h>
+ 
+ typedef struct ccm_x86_aes_ctx {
+ 	AES_KEY key;
+@@ -95,6 +96,25 @@ aes_ccm_aead_encrypt(void *_ctx,
+ 	if (unlikely(encr_size < plain_size + tag_size))
+ 		return gnutls_assert_val(GNUTLS_E_SHORT_MEMORY_BUFFER);
+ 
++	/* SP800-38C A.1 says Tlen must be a multiple of 16 between 32
++	 * and 128.
++	 */
++	switch (tag_size) {
++	case 4: case 6:
++		/* SP800-38C B.2 says Tlen smaller than 64 should not be used
++		 * under sufficient restriction. We simply allow those for now.
++		 */
++		FALLTHROUGH;
++	case 8: case 10: case 12: case 14: case 16:
++		break;
++	default:
++		if (_gnutls_fips_mode_enabled()) {
++			_gnutls_switch_fips_state(GNUTLS_FIPS140_OP_ERROR);
++			return gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
++		}
++		break;
++	}
++
+ 	ccm_encrypt_message(&ctx->key, x86_aes_encrypt,
+ 			    nonce_size, nonce,
+ 			    auth_size, auth,
+@@ -121,6 +141,25 @@ aes_ccm_aead_decrypt(void *_ctx,
+ 	if (unlikely(plain_size < encr_size - tag_size))
+ 		return gnutls_assert_val(GNUTLS_E_SHORT_MEMORY_BUFFER);
+ 
++	/* SP800-38C A.1 says Tlen must be a multiple of 16 between 32
++	 * and 128.
++	 */
++	switch (tag_size) {
++	case 4: case 6:
++		/* SP800-38C B.2 says Tlen smaller than 64 should not be used
++		 * under sufficient restriction. We simply allow those for now.
++		 */
++		FALLTHROUGH;
++	case 8: case 10: case 12: case 14: case 16:
++		break;
++	default:
++		if (_gnutls_fips_mode_enabled()) {
++			_gnutls_switch_fips_state(GNUTLS_FIPS140_OP_ERROR);
++			return gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
++		}
++		break;
++	}
++
+ 	ret = ccm_decrypt_message(&ctx->key, x86_aes_encrypt,
+ 				  nonce_size, nonce,
+ 				  auth_size, auth,
+diff --git a/lib/nettle/cipher.c b/lib/nettle/cipher.c
+index 9c2ce19e7e..8c23d11252 100644
+--- a/lib/nettle/cipher.c
++++ b/lib/nettle/cipher.c
+@@ -1253,6 +1253,34 @@ wrap_nettle_cipher_aead_encrypt(void *_ctx,
+ 		ctx->cipher->tag(ctx->ctx_ptr, tag_size, ((uint8_t*)encr) + plain_size);
+ 	} else {
+ 		/* CCM-style cipher */
++
++		switch (ctx->cipher->algo) {
++		case GNUTLS_CIPHER_AES_128_CCM:
++		case GNUTLS_CIPHER_AES_256_CCM:
++			/* SP800-38C A.1 says Tlen must be a multiple of 16
++			 * between 32 and 128.
++			 */
++			switch (tag_size) {
++			case 4: case 6:
++				/* SP800-38C B.2 says Tlen smaller than 64
++				 * should not be used under sufficient
++				 * restriction. We simply allow those for now.
++				 */
++				FALLTHROUGH;
++			case 8: case 10: case 12: case 14: case 16:
++				break;
++			default:
++				if (_gnutls_fips_mode_enabled()) {
++					_gnutls_switch_fips_state(GNUTLS_FIPS140_OP_ERROR);
++					return gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
++				}
++				break;
++			}
++			break;
++		default:
++			break;
++		}
++
+ 		ctx->cipher->aead_encrypt(ctx,
+ 					  nonce_size, nonce,
+ 					  auth_size, auth,
+@@ -1302,6 +1330,33 @@ wrap_nettle_cipher_aead_decrypt(void *_ctx,
+ 		if (unlikely(plain_size < encr_size))
+ 			return gnutls_assert_val(GNUTLS_E_SHORT_MEMORY_BUFFER);
+ 
++		switch (ctx->cipher->algo) {
++		case GNUTLS_CIPHER_AES_128_CCM:
++		case GNUTLS_CIPHER_AES_256_CCM:
++			/* SP800-38C A.1 says Tlen must be a multiple of 16
++			 * between 32 and 128.
++			 */
++			switch (tag_size) {
++			case 4: case 6:
++				/* SP800-38C B.2 says Tlen smaller than 64
++				 * should not be used under sufficient
++				 * restriction. We simply allow those for now.
++				 */
++				FALLTHROUGH;
++			case 8: case 10: case 12: case 14: case 16:
++				break;
++			default:
++				if (_gnutls_fips_mode_enabled()) {
++					_gnutls_switch_fips_state(GNUTLS_FIPS140_OP_ERROR);
++					return gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
++				}
++				break;
++			}
++			break;
++		default:
++			break;
++		}
++
+ 		ret = ctx->cipher->aead_decrypt(ctx,
+ 						nonce_size, nonce,
+ 						auth_size, auth,
+diff --git a/tests/fips-test.c b/tests/fips-test.c
+index f7556d7bbb..c43503fba0 100644
+--- a/tests/fips-test.c
++++ b/tests/fips-test.c
+@@ -1,4 +1,5 @@
+ #include <config.h>
++#include <stdbool.h>
+ #include <stdint.h>
+ #include <stdio.h>
+ #include <string.h>
+@@ -213,14 +214,96 @@ test_cipher_disallowed(gnutls_cipher_algorithm_t cipher)
+ 	FIPS_POP_CONTEXT(ERROR);
+ }
+ 
++static void
++test_ccm_cipher(gnutls_cipher_algorithm_t cipher, size_t tag_length,
++		bool expect_encryption_fail,
++		gnutls_fips140_operation_state_t expected_state)
++{
++	int ret;
++	unsigned key_size = gnutls_cipher_get_key_size(cipher);
++	gnutls_aead_cipher_hd_t h;
++	gnutls_datum_t key = { key_data, key_size };
++	unsigned char buffer[256];
++	size_t length;
++	gnutls_memset(key_data, 0, key_size);
++
++	FIPS_PUSH_CONTEXT();
++	ret = gnutls_aead_cipher_init(&h, cipher, &key);
++	if (ret < 0) {
++		fail("gnutls_aead_cipher_init failed for %s\n",
++		     gnutls_cipher_get_name(cipher));
++	}
++	FIPS_POP_CONTEXT(APPROVED);
++
++	fips_push_context(fips_context);
++	memset(buffer, 0, sizeof(buffer));
++	length = sizeof(buffer);
++	ret = gnutls_aead_cipher_encrypt(h, iv_data,
++					 gnutls_cipher_get_iv_size(cipher),
++					 NULL, 0, tag_length,
++					 buffer, length - tag_length,
++					 buffer, &length);
++	if (expect_encryption_fail) {
++		if (ret != GNUTLS_E_INVALID_REQUEST) {
++			fail("gnutls_aead_cipher_encrypt(%s) returned %d "
++			     "while %d is expected\n",
++			     gnutls_cipher_get_name(cipher),
++			     ret, GNUTLS_E_INVALID_REQUEST);
++		}
++	} else if (ret < 0) {
++		fail("gnutls_aead_cipher_encrypt failed for %s\n",
++		     gnutls_cipher_get_name(cipher));
++	}
++	fips_pop_context(fips_context, expected_state);
++
++	fips_push_context(fips_context);
++	length = sizeof(buffer);
++	ret = gnutls_aead_cipher_decrypt(h, iv_data,
++					 gnutls_cipher_get_iv_size(cipher),
++					 NULL, 0, tag_length,
++					 buffer, length,
++					 buffer, &length);
++	if (expect_encryption_fail) {
++		if (ret != GNUTLS_E_INVALID_REQUEST) {
++			fail("gnutls_aead_cipher_decrypt(%s) returned %d "
++			     "while %d is expected\n",
++			     gnutls_cipher_get_name(cipher),
++			     ret, GNUTLS_E_INVALID_REQUEST);
++		}
++	} else if (ret < 0) {
++		fail("gnutls_aead_cipher_decrypt failed for %s\n",
++		     gnutls_cipher_get_name(cipher));
++	}
++	fips_pop_context(fips_context, expected_state);
++
++	gnutls_aead_cipher_deinit(h);
++}
++
+ static inline void
+ test_ciphers(void)
+ {
++	size_t i;
++
+ 	test_cipher_approved(GNUTLS_CIPHER_AES_128_CBC);
+ 	test_cipher_approved(GNUTLS_CIPHER_AES_192_CBC);
+ 	test_cipher_approved(GNUTLS_CIPHER_AES_256_CBC);
+-	test_aead_cipher_approved(GNUTLS_CIPHER_AES_128_CCM);
+-	test_aead_cipher_approved(GNUTLS_CIPHER_AES_256_CCM);
++
++	/* Check for all allowed Tlen */
++	for (i = 4; i <= 16; i += 2) {
++		test_ccm_cipher(GNUTLS_CIPHER_AES_128_CCM, i,
++				false, GNUTLS_FIPS140_OP_APPROVED);
++		test_ccm_cipher(GNUTLS_CIPHER_AES_256_CCM, i,
++				false, GNUTLS_FIPS140_OP_APPROVED);
++	}
++	test_ccm_cipher(GNUTLS_CIPHER_AES_128_CCM, 3,
++			true, GNUTLS_FIPS140_OP_ERROR);
++	test_ccm_cipher(GNUTLS_CIPHER_AES_256_CCM, 3,
++			true, GNUTLS_FIPS140_OP_ERROR);
++	test_ccm_cipher(GNUTLS_CIPHER_AES_128_CCM, 5,
++			true, GNUTLS_FIPS140_OP_ERROR);
++	test_ccm_cipher(GNUTLS_CIPHER_AES_256_CCM, 5,
++			true, GNUTLS_FIPS140_OP_ERROR);
++
+ 	test_aead_cipher_approved(GNUTLS_CIPHER_AES_128_CCM_8);
+ 	test_aead_cipher_approved(GNUTLS_CIPHER_AES_256_CCM_8);
+ 	test_cipher_approved(GNUTLS_CIPHER_AES_128_CFB8);
+-- 
+2.38.1
+

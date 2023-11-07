@@ -1,0 +1,109 @@
+From 00f62aac690ba55650c58fa125a3806a8a684214 Mon Sep 17 00:00:00 2001
+From: Daiki Ueno <ueno@gnu.org>
+Date: Sat, 29 Jul 2023 13:21:37 +0900
+Subject: [PATCH] nettle: mark SHA-1 signature verification non-approved
+
+Signed-off-by: Daiki Ueno <ueno@gnu.org>
+---
+ lib/nettle/pk.c   | 13 +++++--------
+ lib/pubkey.c      |  3 ---
+ tests/fips-test.c |  8 ++++----
+ 3 files changed, 9 insertions(+), 15 deletions(-)
+
+diff --git a/lib/nettle/pk.c b/lib/nettle/pk.c
+index c098e2aa45..f0b8b6d707 100644
+--- a/lib/nettle/pk.c
++++ b/lib/nettle/pk.c
+@@ -1575,10 +1575,7 @@ _wrap_nettle_pk_verify(gnutls_pk_algorithm_t algo,
+ 			if (hash_len > vdata->size)
+ 				hash_len = vdata->size;
+ 
+-			/* SHA-1 is allowed for SigVer in FIPS 140-3 in legacy
+-			 * mode */
+ 			switch (DIG_TO_MAC(sign_params->dsa_dig)) {
+-			case GNUTLS_MAC_SHA1:
+ 			case GNUTLS_MAC_SHA256:
+ 			case GNUTLS_MAC_SHA384:
+ 			case GNUTLS_MAC_SHA512:
+@@ -1656,8 +1653,8 @@ _wrap_nettle_pk_verify(gnutls_pk_algorithm_t algo,
+ 			 * 2048-bit or one of the known lengths (1024, 1280,
+ 			 * 1536, 1792; i.e., multiple of 256-bits).
+ 			 *
+-			 * In addition to this, only SHA-1 and SHA-2 are allowed
+-			 * for SigVer; it is checked in _pkcs1_rsa_verify_sig in
++			 * In addition to this, only SHA-2 is allowed for
++			 * SigVer; it is checked in _pkcs1_rsa_verify_sig in
+ 			 * lib/pubkey.c.
+ 			 */
+ 			if (unlikely(bits < 2048 &&
+@@ -1709,9 +1706,9 @@ _wrap_nettle_pk_verify(gnutls_pk_algorithm_t algo,
+ 			}
+ 
+ 			/* RSA modulus size should be 2048-bit or larger in FIPS
+-			 * 140-3.  In addition to this, only SHA-1 and SHA-2 are
+-			 * allowed for SigVer, while Nettle only supports
+-			 * SHA256, SHA384, and SHA512 for RSA-PSS (see
++			 * 140-3.  In addition to this, only SHA-2 is allowed
++			 * for SigVer, while Nettle only supports SHA256,
++			 * SHA384, and SHA512 for RSA-PSS (see
+ 			 * _rsa_pss_verify_digest in this file for the details).
+ 			 */
+ 			if (unlikely(mpz_sizeinbase(pub.n, 2) < 2048)) {
+diff --git a/lib/pubkey.c b/lib/pubkey.c
+index be1b045fa7..052707d5da 100644
+--- a/lib/pubkey.c
++++ b/lib/pubkey.c
+@@ -2370,10 +2370,7 @@ _pkcs1_rsa_verify_sig(gnutls_pk_algorithm_t pk,
+ 	d.size = digest_size;
+ 
+ 	if (pk == GNUTLS_PK_RSA) {
+-		/* SHA-1 is allowed for SigVer in FIPS 140-3 in legacy
+-		 * mode */
+ 		switch (me->id) {
+-		case GNUTLS_MAC_SHA1:
+ 		case GNUTLS_MAC_SHA256:
+ 		case GNUTLS_MAC_SHA384:
+ 		case GNUTLS_MAC_SHA512:
+diff --git a/tests/fips-test.c b/tests/fips-test.c
+index f789afb107..3549b727b9 100644
+--- a/tests/fips-test.c
++++ b/tests/fips-test.c
+@@ -471,7 +471,7 @@ void doit(void)
+ 	}
+ 	FIPS_POP_CONTEXT(NOT_APPROVED);
+ 
+-	/* Verify a signature created with 2432-bit RSA and SHA-1; approved */
++	/* Verify a signature created with 2432-bit RSA and SHA-1; not approved */
+ 	FIPS_PUSH_CONTEXT();
+ 	ret = gnutls_pubkey_verify_data2(pubkey, GNUTLS_SIGN_RSA_SHA1,
+ 					 GNUTLS_VERIFY_ALLOW_SIGN_WITH_SHA1, &data,
+@@ -479,7 +479,7 @@ void doit(void)
+ 	if (ret < 0) {
+ 		fail("gnutls_pubkey_verify_data2 failed\n");
+ 	}
+-	FIPS_POP_CONTEXT(APPROVED);
++	FIPS_POP_CONTEXT(NOT_APPROVED);
+ 	gnutls_free(signature.data);
+ 	gnutls_pubkey_deinit(pubkey);
+ 	gnutls_privkey_deinit(privkey);
+@@ -583,7 +583,7 @@ void doit(void)
+ 	}
+ 	FIPS_POP_CONTEXT(NOT_APPROVED);
+ 
+-	/* Verify a signature created with ECDSA and SHA-1; approved */
++	/* Verify a signature created with ECDSA and SHA-1; not approved */
+ 	FIPS_PUSH_CONTEXT();
+ 	ret = gnutls_pubkey_verify_data2(pubkey, GNUTLS_SIGN_ECDSA_SHA1,
+ 					 GNUTLS_VERIFY_ALLOW_SIGN_WITH_SHA1, &data,
+@@ -591,7 +591,7 @@ void doit(void)
+ 	if (ret < 0) {
+ 		fail("gnutls_pubkey_verify_data2 failed\n");
+ 	}
+-	FIPS_POP_CONTEXT(APPROVED);
++	FIPS_POP_CONTEXT(NOT_APPROVED);
+ 	gnutls_free(signature.data);
+ 
+ 	/* Create a signature with ECDSA and SHA-1 (old API); not approved */
+-- 
+2.41.0
+
