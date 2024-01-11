@@ -1,5 +1,5 @@
 Version:	3.6.16
-Release: 6%{?dist}
+Release: 7%{?dist}
 Patch1:	gnutls-3.2.7-rpath.patch
 Patch2:	gnutls-3.6.4-no-now-guile.patch
 Patch3:	gnutls-3.6.13-enable-intel-cet.patch
@@ -11,6 +11,7 @@ Patch14:	gnutls-3.6.16-doc-p11tool-ckaid.patch
 Patch15:	gnutls-3.6.16-pkcs7-verify.patch
 Patch16:	gnutls-3.6.16-cpuid.patch
 Patch17:	gnutls-3.7.8-rsa-kx-timing.patch
+Patch18:	gnutls-3.6.16-rehandshake-tickets.patch
 %bcond_without dane
 %if 0%{?rhel}
 %bcond_with guile
@@ -156,7 +157,7 @@ This package contains Guile bindings for the library.
 %prep
 gpgv2 --keyring %{SOURCE2} %{SOURCE1} %{SOURCE0}
 
-%autosetup -p1
+%autosetup -p1 -S git
 
 sed -i -e 's|sys_lib_dlsearch_path_spec="/lib /usr/lib|sys_lib_dlsearch_path_spec="/lib /usr/lib %{_libdir}|g' configure
 rm -f lib/minitasn1/*.c lib/minitasn1/*.h
@@ -295,6 +296,9 @@ fi
 %endif
 
 %changelog
+* Mon Jun 26 2023 Daiki Ueno <dueno@redhat.com> - 3.6.16-7
+- Clear server's session ticket indication at rehandshake (#2089817)
+
 * Thu Feb 23 2023 Zoltan Fridrich <zfridric@redhat.com> - 3.6.16-6
 - Fix x86_64 CPU feature detection when AVX is not available (#2131152)
 - Fix timing side-channel in TLS RSA key exchange (#2162598)
