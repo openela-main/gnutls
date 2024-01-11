@@ -13,7 +13,7 @@ print(string.sub(hash, 0, 16))
 }
 
 Version: 3.7.6
-Release: 21%{?dist}
+Release: 23%{?dist}
 # not upstreamed
 Patch: gnutls-3.6.7-no-now-guile.patch
 Patch: gnutls-3.2.7-rpath.patch
@@ -41,6 +41,7 @@ Patch: gnutls-3.7.8-revert-hmac-name.patch
 Patch: gnutls-3.7.8-rsa-kx-timing.patch
 Patch: gnutls-3.7.8-fips-pct-dh.patch
 Patch: gnutls-3.7.6-fips-ems.patch
+Patch: gnutls-3.7.6-fips-sha1-sigver.patch
 
 # not upstreamed
 Patch: gnutls-3.7.3-disable-config-reload.patch
@@ -420,9 +421,14 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
-* Thu Jul 13 2023 Daiki Ueno <dueno@redhat.com> - 3.7.6-21
-- Require use of extended master secret in FIPS mode by default (#2227257)
+* Sat Jul 29 2023 Daiki Ueno <dueno@redhat.com> - 3.7.6-23
+- Mark SHA-1 signature verification non-approved in FIPS (#2102751)
+
+* Tue Jul 18 2023 Daiki Ueno <dueno@redhat.com> - 3.7.6-22
 - Skip KTLS test on old kernel if host and target arches are different
+
+* Thu Jul 13 2023 Daiki Ueno <dueno@redhat.com> - 3.7.6-21
+- Require use of extended master secret in FIPS mode by default (#2157953)
 
 * Tue Mar 14 2023 Daiki Ueno <dueno@redhat.com> - 3.7.6-20
 - Fix the previous change (#2175214)
