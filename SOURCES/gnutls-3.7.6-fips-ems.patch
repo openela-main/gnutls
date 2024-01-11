@@ -1,0 +1,805 @@
+From 4751e1e2d4012404af9bc52535aa73ac88bc7bea Mon Sep 17 00:00:00 2001
+From: rpm-build <rpm-build>
+Date: Thu, 13 Jul 2023 16:14:08 +0200
+Subject: [PATCH] gnutls-3.7.6-fips-ems.patch
+
+---
+ doc/cha-gtls-app.texi                         |   5 +
+ lib/gnutls_int.h                              |   6 +
+ lib/handshake.c                               |  35 ++++-
+ lib/nettle/int/tls1-prf.c                     |  19 +++
+ lib/priority.c                                |  41 +++++
+ lib/priority_options.gperf                    |   1 +
+ tests/Makefile.am                             |   4 +-
+ tests/multi-alerts.c                          |   8 +
+ tests/no-extensions.c                         |   7 +
+ .../ocsp-tests/ocsp-must-staple-connection.sh |  60 +++----
+ tests/rehandshake-ext-secret.c                |   8 +
+ tests/resume.c                                |  26 ++-
+ tests/status-request.c                        |   8 +-
+ tests/system-override-session-hash.sh         | 144 +++++++++++++++++
+ tests/tls-force-ems.c                         | 148 ++++++++++++++++++
+ 15 files changed, 477 insertions(+), 43 deletions(-)
+ create mode 100755 tests/system-override-session-hash.sh
+ create mode 100644 tests/tls-force-ems.c
+
+diff --git a/doc/cha-gtls-app.texi b/doc/cha-gtls-app.texi
+index bd44478..57e7d50 100644
+--- a/doc/cha-gtls-app.texi
++++ b/doc/cha-gtls-app.texi
+@@ -1547,6 +1547,11 @@ This is implied by the PFS keyword.
+ will prevent the advertizing the TLS extended master secret (session hash)
+ extension.
+ 
++@item %FORCE_SESSION_HASH @tab
++negotiate the TLS extended master secret (session hash) extension.
++Specifying both %NO_SESSION_HASH and %FORCE_SESSION_HASH is not
++supported, and the behavior is undefined.
++
+ @item %SERVER_PRECEDENCE @tab
+ The ciphersuite will be selected according to server priorities
+ and not the client's.
+diff --git a/lib/gnutls_int.h b/lib/gnutls_int.h
+index 8c7bdaa..c6bf154 100644
+--- a/lib/gnutls_int.h
++++ b/lib/gnutls_int.h
+@@ -926,6 +926,11 @@ typedef struct sign_algo_list_st {
+ 
+ #include "atomic.h"
+ 
++typedef enum ext_master_secret_t {
++	EMS_REQUEST,
++	EMS_REQUIRE
++} ext_master_secret_t;
++
+ /* For the external api */
+ struct gnutls_priority_st {
+ 	priority_st protocol;
+@@ -965,6 +970,7 @@ struct gnutls_priority_st {
+ 	bool force_etm;
+ 	unsigned int additional_verify_flags;
+ 	bool tls13_compat_mode;
++	ext_master_secret_t force_ext_master_secret;
+ 
+ 	/* TLS_FALLBACK_SCSV */
+ 	bool fallback;
+diff --git a/lib/handshake.c b/lib/handshake.c
+index 21edc5e..1e33b84 100644
+--- a/lib/handshake.c
++++ b/lib/handshake.c
+@@ -875,6 +875,15 @@ read_client_hello(gnutls_session_t session, uint8_t * data,
+ 	if (_gnutls_version_priority(session, vers->id) < 0)
+ 		return gnutls_assert_val(GNUTLS_E_UNSUPPORTED_VERSION_PACKET);
+ 
++	/* check if EMS is required */
++	if (!vers->tls13_sem && vers->id != GNUTLS_SSL3 &&
++	    vers->id != GNUTLS_DTLS0_9 &&
++	    session->internals.priorities->force_ext_master_secret ==
++		    EMS_REQUIRE &&
++	    !session->security_parameters.ext_master_secret) {
++		return gnutls_assert_val(GNUTLS_E_INSUFFICIENT_SECURITY);
++	}
++
+ 	_gnutls_handshake_log("HSK[%p]: Selected version %s\n", session, vers->name);
+ 
+ 	/* select appropriate compression method */
+@@ -2062,11 +2071,27 @@ read_server_hello(gnutls_session_t session,
+ 	if (ret < 0)
+ 		return gnutls_assert_val(ret);
+ 
+-	/* check if EtM is required */
+-	if (!vers->tls13_sem && session->internals.priorities->force_etm && !session->security_parameters.etm) {
+-		const cipher_entry_st *cipher = cipher_to_entry(session->security_parameters.cs->block_algorithm);
+-		if (_gnutls_cipher_type(cipher) == CIPHER_BLOCK)
+-			return gnutls_assert_val(GNUTLS_E_UNWANTED_ALGORITHM);
++	if (!vers->tls13_sem) {
++		/* check if EtM is required */
++		if (session->internals.priorities->force_etm &&
++		    !session->security_parameters.etm) {
++			const cipher_entry_st *cipher =
++			    cipher_to_entry(session->security_parameters.
++					    cs->block_algorithm);
++			if (_gnutls_cipher_type(cipher) == CIPHER_BLOCK)
++				return
++				    gnutls_assert_val
++				    (GNUTLS_E_UNWANTED_ALGORITHM);
++		}
++
++		/* check if EMS is required */
++		if (vers->id != GNUTLS_SSL3 && vers->id != GNUTLS_DTLS0_9 &&
++		    session->internals.priorities->force_ext_master_secret ==
++			    EMS_REQUIRE &&
++		    !session->security_parameters.ext_master_secret) {
++			return
++			    gnutls_assert_val(GNUTLS_E_INSUFFICIENT_SECURITY);
++		}
+ 	}
+ 
+ 
+diff --git a/lib/nettle/int/tls1-prf.c b/lib/nettle/int/tls1-prf.c
+index 19ca5d3..fd9b5a4 100644
+--- a/lib/nettle/int/tls1-prf.c
++++ b/lib/nettle/int/tls1-prf.c
+@@ -28,6 +28,7 @@
+ #endif
+ 
+ #include <gnutls_int.h>
++#include "fips.h"
+ 
+ #include <stdlib.h>
+ #include <string.h>
+@@ -152,8 +153,26 @@ tls12_prf(void *mac_ctx,
+ 	  size_t seed_size, const uint8_t *seed,
+ 	  size_t length, uint8_t *dst)
+ {
++#define MASTER_SECRET "master secret"
++#define MASTER_SECRET_SIZE (sizeof(MASTER_SECRET) - 1)
++
+ 	P_hash(mac_ctx, update, digest, digest_size,
+ 		seed_size, seed, label_size, label, length, dst);
+ 
++	/* Since May 16, 2023, the use of extended master secret is
++	 * mandatory according to FIPS 140-3 IG D.Q.  Instead of
++	 * allowing the "extended master secret" label specifically,
++	 * we mark the use of non-EMS label, i.e., "master secret" as
++	 * non-approved, because it is still useful to call the
++	 * gnutls_prf_raw function with arbitrary label, e.g., in
++	 * self-tests.
++	 */
++	if (label_size == MASTER_SECRET_SIZE &&
++	    memcmp(label, MASTER_SECRET, MASTER_SECRET_SIZE) == 0) {
++		_gnutls_switch_fips_state(GNUTLS_FIPS140_OP_NOT_APPROVED);
++	} else {
++		_gnutls_switch_fips_state(GNUTLS_FIPS140_OP_APPROVED);
++	}
++
+ 	return 1;
+ }
+diff --git a/lib/priority.c b/lib/priority.c
+index d163d81..4adf4c7 100644
+--- a/lib/priority.c
++++ b/lib/priority.c
+@@ -906,6 +906,12 @@ static void enable_no_ext_master_secret(gnutls_priority_t c)
+ {
+ 	c->_no_ext_master_secret = 1;
+ }
++
++static void enable_force_ext_master_secret(gnutls_priority_t c)
++{
++	c->force_ext_master_secret = EMS_REQUIRE;
++}
++
+ static void enable_no_etm(gnutls_priority_t c)
+ {
+ 	c->_no_etm = 1;
+@@ -1040,6 +1046,9 @@ struct cfg {
+ 	gnutls_kx_algorithm_t kxs[MAX_ALGOS+1];
+ 	gnutls_sign_algorithm_t sigs[MAX_ALGOS+1];
+ 	gnutls_protocol_t versions[MAX_ALGOS+1];
++
++	ext_master_secret_t force_ext_master_secret;
++	bool force_ext_master_secret_set;
+ };
+ 
+ static inline void
+@@ -1141,6 +1150,8 @@ cfg_steal(struct cfg *dst, struct cfg *src)
+ 
+ 	dst->allowlisting = src->allowlisting;
+ 	dst->ktls_enabled = src->ktls_enabled;
++	dst->force_ext_master_secret = src->force_ext_master_secret;
++	dst->force_ext_master_secret_set = src->force_ext_master_secret_set;
+ 	memcpy(dst->ciphers, src->ciphers, sizeof(src->ciphers));
+ 	memcpy(dst->macs, src->macs, sizeof(src->macs));
+ 	memcpy(dst->groups, src->groups, sizeof(src->groups));
+@@ -1748,6 +1759,21 @@ static int cfg_ini_handler(void *_ctx, const char *section, const char *name, co
+ 			}
+ 			cfg->kxs[i] = algo;
+ 			cfg->kxs[i+1] = 0;
++		} else if (c_strcasecmp(name, "tls-session-hash") == 0) {
++			if (c_strcasecmp(value, "request") == 0) {
++				cfg->force_ext_master_secret = EMS_REQUEST;
++				cfg->force_ext_master_secret_set = true;
++			} else if (c_strcasecmp(value, "require") == 0) {
++				cfg->force_ext_master_secret = EMS_REQUIRE;
++				cfg->force_ext_master_secret_set = true;
++			} else {
++				_gnutls_debug_log(
++					"cfg: unknown value for %s: %s\n", name,
++					value);
++				if (fail_on_invalid_config)
++					return 0;
++				goto exit;
++			}
+ 		} else {
+ 			_gnutls_debug_log("unknown parameter %s\n", name);
+ 			if (fail_on_invalid_config)
+@@ -2744,6 +2770,12 @@ gnutls_priority_init(gnutls_priority_t * priority_cache,
+ 	(*priority_cache)->min_record_version = 1;
+ 	gnutls_atomic_init(&(*priority_cache)->usage_cnt);
+ 
++	if (_gnutls_fips_mode_enabled()) {
++		(*priority_cache)->force_ext_master_secret = EMS_REQUIRE;
++	} else {
++		(*priority_cache)->force_ext_master_secret = EMS_REQUEST;
++	}
++
+ 	if (system_wide_config.allowlisting && !priorities) {
+ 		priorities = "@" LEVEL_SYSTEM;
+ 	}
+@@ -2997,6 +3029,15 @@ gnutls_priority_init(gnutls_priority_t * priority_cache,
+ 			goto error;
+ 	}
+ 
++	/* This needs to be done after parsing modifiers, as
++	 * tls-session-hash has precedence over modifiers.
++	 */
++	if (system_wide_config.force_ext_master_secret_set) {
++		(*priority_cache)->force_ext_master_secret =
++			system_wide_config.force_ext_master_secret;
++		(*priority_cache)->_no_ext_master_secret = false;
++	}
++
+ 	ret = set_ciphersuite_list(*priority_cache);
+ 	if (ret < 0) {
+ 		if (err_pos)
+diff --git a/lib/priority_options.gperf b/lib/priority_options.gperf
+index 5a041b7..5bb250a 100644
+--- a/lib/priority_options.gperf
++++ b/lib/priority_options.gperf
+@@ -13,6 +13,7 @@ NO_TICKETS_TLS12, enable_no_tickets_tls12
+ NO_ETM, enable_no_etm
+ FORCE_ETM, enable_force_etm
+ NO_SESSION_HASH, enable_no_ext_master_secret
++FORCE_SESSION_HASH, enable_force_ext_master_secret
+ STATELESS_COMPRESSION, dummy_func
+ VERIFY_ALLOW_BROKEN, enable_verify_allow_broken
+ VERIFY_ALLOW_SIGN_RSA_MD5, enable_verify_allow_rsa_md5
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index 23d309d..e5f7fa6 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -77,7 +77,7 @@ EXTRA_DIST = suppressions.valgrind eagain-common.h cert-common.h test-chains.h \
+ 	testpkcs11-certs/client.key testpkcs11-certs/server.crt testpkcs11-certs/server-tmpl \
+ 	testpkcs11-certs/ca.key testpkcs11-certs/client.crt testpkcs11-certs/client-tmpl testpkcs11-certs/server.key \
+ 	crt_type-neg-common.c \
+-	system-override-default-priority-string.bad.config system-override-default-priority-string.none.config system-override-default-priority-string.only-tls13.config \
++	system-override-default-priority-string.bad.config system-override-default-priority-string.none.config system-override-default-priority-string.only-tls13.config system-override-session-hash.sh \
+ 	client-secrets.h server-secrets.h
+ 
+ AM_CFLAGS = $(WARN_CFLAGS) $(WERROR_CFLAGS)
+@@ -234,7 +234,7 @@ ctests += mini-record-2 simple gnutls_hmac_fast set_pkcs12_cred cert certuniquei
+ 	 set_x509_ocsp_multi_cli kdf-api keylog-func handshake-write \
+ 	 x509cert-dntypes id-on-xmppAddr tls13-compat-mode ciphersuite-name \
+ 	 x509-upnconstraint cipher-padding xts-key-check pkcs7-verify-double-free \
+-	 fips-rsa-sizes tls12-rehandshake-ticket
++	 fips-rsa-sizes tls12-rehandshake-ticket tls-force-ems
+ 
+ ctests += tls-channel-binding
+ 
+diff --git a/tests/multi-alerts.c b/tests/multi-alerts.c
+index 84a412c..27be63b 100644
+--- a/tests/multi-alerts.c
++++ b/tests/multi-alerts.c
+@@ -198,6 +198,14 @@ void doit(void)
+ 	int sockets[2];
+ 	int err;
+ 
++	/* This test does not work under FIPS, as extended master
++	 * secret extension needs to be negotiated through extensions,
++	 * but the fixture does not contain the extension.
++	 */
++	if (gnutls_fips140_mode_enabled()) {
++		exit(77);
++	}
++
+ 	err = socketpair(AF_UNIX, SOCK_STREAM, 0, sockets);
+ 	if (err == -1) {
+ 		perror("socketpair");
+diff --git a/tests/no-extensions.c b/tests/no-extensions.c
+index 3bd9d06..e5b9578 100644
+--- a/tests/no-extensions.c
++++ b/tests/no-extensions.c
+@@ -205,6 +205,13 @@ void start(const char *prio, gnutls_protocol_t exp_version)
+ 
+ void doit(void)
+ {
++	/* This test does not work under FIPS, as extended master
++	 * secret extension needs to be negotiated through extensions.
++	 */
++	if (gnutls_fips140_mode_enabled()) {
++		exit(77);
++	}
++
+ 	start("NORMAL:-VERS-ALL:+VERS-TLS1.0:%NO_EXTENSIONS", GNUTLS_TLS1_0);
+ 	start("NORMAL:-VERS-ALL:+VERS-TLS1.1:%NO_EXTENSIONS", GNUTLS_TLS1_1);
+ 	start("NORMAL:-VERS-ALL:+VERS-TLS1.2:%NO_EXTENSIONS", GNUTLS_TLS1_2);
+diff --git a/tests/ocsp-tests/ocsp-must-staple-connection.sh b/tests/ocsp-tests/ocsp-must-staple-connection.sh
+index 049491a..594e854 100755
+--- a/tests/ocsp-tests/ocsp-must-staple-connection.sh
++++ b/tests/ocsp-tests/ocsp-must-staple-connection.sh
+@@ -402,39 +402,43 @@ kill "${TLS_SERVER_PID}"
+ wait "${TLS_SERVER_PID}"
+ unset TLS_SERVER_PID
+ 
+-echo "=== Test 7: OSCP response error - client doesn't send status_request ==="
+-
+-eval "${GETPORT}"
+-# Port for gnutls-serv
+-TLS_SERVER_PORT=$PORT
+-PORT=${TLS_SERVER_PORT}
+-launch_bare_server \
+-	  datefudge "${TESTDATE}" \
+-	  "${SERV}" --echo --disable-client-cert \
+-	  --x509keyfile="${srcdir}/ocsp-tests/certs/server_good.key" \
+-	  --x509certfile="${SERVER_CERT_FILE}" \
+-	  --port="${TLS_SERVER_PORT}" \
+-	  --ocsp-response="${srcdir}/ocsp-tests/response3.der" --ignore-ocsp-response-errors
+-TLS_SERVER_PID="${!}"
+-wait_server $TLS_SERVER_PID
++if test "${GNUTLS_FORCE_FIPS_MODE}" != 1; then
++
++    echo "=== Test 7: OSCP response error - client doesn't send status_request ==="
++
++    eval "${GETPORT}"
++    # Port for gnutls-serv
++    TLS_SERVER_PORT=$PORT
++    PORT=${TLS_SERVER_PORT}
++    launch_bare_server \
++	datefudge "${TESTDATE}" \
++	"${SERV}" --echo --disable-client-cert \
++	--x509keyfile="${srcdir}/ocsp-tests/certs/server_good.key" \
++	--x509certfile="${SERVER_CERT_FILE}" \
++	--port="${TLS_SERVER_PORT}" \
++	--ocsp-response="${srcdir}/ocsp-tests/response3.der" --ignore-ocsp-response-errors
++    TLS_SERVER_PID="${!}"
++    wait_server $TLS_SERVER_PID
++
++    wait_for_port "${TLS_SERVER_PORT}"
++
++    echo "test 123456" | \
++	datefudge -s "${TESTDATE}" \
++		  "${CLI}" --priority "NORMAL:%NO_EXTENSIONS" --ocsp --x509cafile="${srcdir}/ocsp-tests/certs/ca.pem" \
++		  --port="${TLS_SERVER_PORT}" localhost
++    rc=$?
+ 
+-wait_for_port "${TLS_SERVER_PORT}"
++    if test "${rc}" != "0"; then
++	echo "Connecting to server with valid certificate and OCSP error response failed"
++	exit ${rc}
++    fi
+ 
+-echo "test 123456" | \
+-    datefudge -s "${TESTDATE}" \
+-	      "${CLI}" --priority "NORMAL:%NO_EXTENSIONS" --ocsp --x509cafile="${srcdir}/ocsp-tests/certs/ca.pem" \
+-	      --port="${TLS_SERVER_PORT}" localhost
+-rc=$?
++    kill "${TLS_SERVER_PID}"
++    wait "${TLS_SERVER_PID}"
++    unset TLS_SERVER_PID
+ 
+-if test "${rc}" != "0"; then
+-    echo "Connecting to server with valid certificate and OCSP error response failed"
+-    exit ${rc}
+ fi
+ 
+-kill "${TLS_SERVER_PID}"
+-wait "${TLS_SERVER_PID}"
+-unset TLS_SERVER_PID
+-
+ echo "=== Test 8: OSCP response error - client sends status_request, no TLS feature extension ==="
+ 
+ eval "${GETPORT}"
+diff --git a/tests/rehandshake-ext-secret.c b/tests/rehandshake-ext-secret.c
+index 94279f0..8d68c9b 100644
+--- a/tests/rehandshake-ext-secret.c
++++ b/tests/rehandshake-ext-secret.c
+@@ -142,6 +142,14 @@ static void try(unsigned onclient)
+ 
+ void doit(void)
+ {
++	/* This test does not work with TLS 1.2 under FIPS, as
++	 * extended master secret extension needs to be negotiated
++	 * through extensions, while %NO_SESSION_HASH is set.
++	 */
++	if (gnutls_fips140_mode_enabled()) {
++		exit(77);
++	}
++
+ 	try(0);
+ 	reset_buffers();
+ 	try(1);
+diff --git a/tests/resume.c b/tests/resume.c
+index 93838c0..aa3c60c 100644
+--- a/tests/resume.c
++++ b/tests/resume.c
+@@ -91,6 +91,7 @@ struct params_res {
+ 	int change_ciphersuite;
+ 	int early_start;
+ 	int no_early_start;
++	int no_fips;
+ };
+ 
+ pid_t child;
+@@ -126,16 +127,18 @@ struct params_res resume_tests[] = {
+ 	 .enable_session_ticket_client = ST_NONE,
+ 	 .expect_resume = 0,
+ 	 .first_no_ext_master = 0,
+-	 .second_no_ext_master = 1},
++	 .second_no_ext_master = 1,
++	 .no_fips = 1},
+ 	{.desc = "try to resume from db (none -> ext master secret)",
+ 	 .enable_db = 1,
+ 	 .enable_session_ticket_server = ST_NONE,
+ 	 .enable_session_ticket_client = ST_NONE,
+ 	 .expect_resume = 0,
+ 	 .first_no_ext_master = 1,
+-	 .second_no_ext_master = 0},
+-#endif
+-#if defined(TLS13)
++	 .second_no_ext_master = 0,
++	 .no_fips = 1},
++# endif
++# if defined(TLS13)
+ 	/* only makes sense under TLS1.3 as negotiation involves a new
+ 	 * handshake with different parameters */
+ 	{.desc = "try to resume from session ticket (different cipher order)",
+@@ -211,14 +214,17 @@ struct params_res resume_tests[] = {
+ 	 .enable_session_ticket_client = ST_ALL,
+ 	 .expect_resume = 0,
+ 	 .first_no_ext_master = 0,
+-	 .second_no_ext_master = 1},
+-	{.desc = "try to resume from session ticket (none -> ext master secret)",
++	 .second_no_ext_master = 1,
++	 .no_fips = 1},
++	{.desc =
++	 "try to resume from session ticket (none -> ext master secret)",
+ 	 .enable_db = 0,
+ 	 .enable_session_ticket_server = ST_ALL,
+ 	 .enable_session_ticket_client = ST_ALL,
+ 	 .expect_resume = 0,
+ 	 .first_no_ext_master = 1,
+-	 .second_no_ext_master = 0},
++	 .second_no_ext_master = 0,
++	 .no_fips = 1},
+ 	{.desc = "try to resume from session ticket (server only)",
+ 	  .enable_db = 0,
+ 	  .enable_session_ticket_server = ST_ALL,
+@@ -942,6 +948,12 @@ void doit(void)
+ 		int client_sds[SESSIONS], server_sds[SESSIONS];
+ 		int j;
+ 
++		if (resume_tests[i].no_fips && gnutls_fips140_mode_enabled()) {
++			success("skipping %s under FIPS mode\n",
++				resume_tests[i].desc);
++			continue;
++		}
++
+ 		printf("%s\n", resume_tests[i].desc);
+ 
+ 		for (j = 0; j < SESSIONS; j++) {
+diff --git a/tests/status-request.c b/tests/status-request.c
+index 07c7918..cd2cc54 100644
+--- a/tests/status-request.c
++++ b/tests/status-request.c
+@@ -289,7 +289,13 @@ void start(const char *prio)
+ 
+ void doit(void)
+ {
+-	start("NORMAL:-VERS-ALL:+VERS-TLS1.2");
++	/* This test does not work with TLS 1.2 under FIPS, as
++	 * extended master secret extension needs to be negotiated
++	 * through extensions.
++	 */
++	if (!gnutls_fips140_mode_enabled()) {
++		start("NORMAL:-VERS-ALL:+VERS-TLS1.2");
++	}
+ 	start("NORMAL:-VERS-ALL:+VERS-TLS1.3");
+ 	start("NORMAL");
+ }
+diff --git a/tests/system-override-session-hash.sh b/tests/system-override-session-hash.sh
+new file mode 100755
+index 0000000..97f11fa
+--- /dev/null
++++ b/tests/system-override-session-hash.sh
+@@ -0,0 +1,144 @@
++#!/bin/sh
++
++# Copyright (C) 2021 Red Hat, Inc.
++#
++# Author: Alexander Sosedkin
++#
++# This file is part of GnuTLS.
++#
++# GnuTLS is free software; you can redistribute it and/or modify it
++# under the terms of the GNU General Public License as published by the
++# Free Software Foundation; either version 3 of the License, or (at
++# your option) any later version.
++#
++# GnuTLS is distributed in the hope that it will be useful, but
++# WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with GnuTLS.  If not, see <https://www.gnu.org/licenses/>.
++
++: ${srcdir=.}
++: ${SERV=../src/gnutls-serv${EXEEXT}}
++: ${CLI=../src/gnutls-cli${EXEEXT}}
++
++if ! test -x "${SERV}"; then
++	exit 77
++fi
++
++if ! test -x "${CLI}"; then
++	exit 77
++fi
++
++${CLI} --fips140-mode
++if test $? = 0;then
++	echo "Cannot run this test in FIPS140 mode"
++	exit 77
++fi
++
++. "${srcdir}/scripts/common.sh"
++
++testdir=`create_testdir cfg`
++
++cat <<_EOF_ > "$testdir/request.cfg"
++[overrides]
++
++tls-session-hash = request
++_EOF_
++
++cat <<_EOF_ > "$testdir/require.cfg"
++[overrides]
++
++tls-session-hash = require
++_EOF_
++
++eval "${GETPORT}"
++
++KEY=${srcdir}/../doc/credentials/x509/key-rsa-pss.pem
++CERT=${srcdir}/../doc/credentials/x509/cert-rsa-pss.pem
++CA=${srcdir}/../doc/credentials/x509/ca.pem
++
++unset GNUTLS_SYSTEM_PRIORITY_FILE
++unset GNUTLS_DEBUG_LEVEL
++
++launch_server --echo --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2" --x509keyfile ${KEY} --x509certfile ${CERT}
++PID=$!
++wait_server ${PID}
++
++export GNUTLS_SYSTEM_PRIORITY_FILE="$testdir/request.cfg"
++export GNUTLS_DEBUG_LEVEL=3
++
++"${CLI}" -p "${PORT}" 127.0.0.1 --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2" --verify-hostname=localhost --x509cafile ${CA} --logfile="$testdir/client.log" </dev/null >/dev/null ||
++	fail "expected connection to succeed (1)"
++
++# "tls-session-hash" has precedence over %FORCE_SESSION_HASH
++"${CLI}" -p "${PORT}" 127.0.0.1 --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2:%FORCE_SESSION_HASH" --verify-hostname=localhost --x509cafile ${CA} --logfile="$testdir/client.log" </dev/null >/dev/null ||
++	fail "expected connection to succeed (2)"
++
++echo kill ${PID}
++kill ${PID}
++wait
++
++unset GNUTLS_SYSTEM_PRIORITY_FILE
++unset GNUTLS_DEBUG_LEVEL
++
++export GNUTLS_SYSTEM_PRIORITY_FILE="$testdir/request.cfg"
++
++# "tls-session-hash" has precedence over %FORCE_SESSION_HASH
++launch_server --echo --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2:%FORCE_SESSION_HASH" --x509keyfile ${KEY} --x509certfile ${CERT}
++PID=$!
++wait_server ${PID}
++
++export GNUTLS_DEBUG_LEVEL=3
++
++"${CLI}" -p "${PORT}" 127.0.0.1 --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2" --verify-hostname=localhost --x509cafile ${CA} --logfile="$testdir/client.log" </dev/null >/dev/null ||
++	fail ${PID} "expected connection to succeed (3)"
++
++"${CLI}" -p "${PORT}" 127.0.0.1 --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2:%NO_SESSION_HASH" --verify-hostname=localhost --x509cafile ${CA} --logfile="$testdir/client.log" </dev/null >/dev/null ||
++	fail ${PID} "expected connection to succeed (4)"
++
++kill ${PID}
++wait
++
++unset GNUTLS_SYSTEM_PRIORITY_FILE
++unset GNUTLS_DEBUG_LEVEL
++
++launch_server --echo --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2" --x509keyfile ${KEY} --x509certfile ${CERT}
++PID=$!
++wait_server ${PID}
++
++export GNUTLS_SYSTEM_PRIORITY_FILE="$testdir/require.cfg"
++export GNUTLS_DEBUG_LEVEL=3
++
++"${CLI}" -p "${PORT}" 127.0.0.1 --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2" --verify-hostname=localhost --x509cafile ${CA} --logfile="$testdir/client.log" </dev/null >/dev/null ||
++	fail ${PID} "expected connection to succeed (5)"
++
++# "tls-session-hash" has precedence over %NO_SESSION_HASH
++"${CLI}" -p "${PORT}" 127.0.0.1 --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2:%NO_SESSION_HASH" --verify-hostname=localhost --x509cafile ${CA} --logfile="$testdir/client.log" </dev/null >/dev/null ||
++	fail ${PID} "expected connection to succeed (6)"
++
++kill ${PID}
++wait
++
++unset GNUTLS_SYSTEM_PRIORITY_FILE
++unset GNUTLS_DEBUG_LEVEL
++
++export GNUTLS_SYSTEM_PRIORITY_FILE="$testdir/require.cfg"
++
++# "tls-session-hash" has precedence over %NO_SESSION_HASH
++launch_server --echo --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2:%NO_SESSION_HASH" --x509keyfile ${KEY} --x509certfile ${CERT}
++PID=$!
++wait_server ${PID}
++
++"${CLI}" -p "${PORT}" 127.0.0.1 --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2" --verify-hostname=localhost --x509cafile ${CA} --logfile="$testdir/client.log" </dev/null >/dev/null ||
++	fail ${PID} "expected connection to succeed (7)"
++
++# "tls-session-hash" has precedence over %NO_SESSION_HASH
++"${CLI}" -p "${PORT}" 127.0.0.1 --priority "NORMAL:-VERS-ALL:+VERS-TLS1.2:%NO_SESSION_HASH" --verify-hostname=localhost --x509cafile ${CA} --logfile="$testdir/client.log" </dev/null >/dev/null ||
++	fail ${PID} "expected connection to succeed (8)"
++
++kill ${PID}
++wait
++
++rm -rf "$testdir"
+diff --git a/tests/tls-force-ems.c b/tests/tls-force-ems.c
+new file mode 100644
+index 0000000..35e7010
+--- /dev/null
++++ b/tests/tls-force-ems.c
+@@ -0,0 +1,148 @@
++/*
++ * Copyright (C) 2023 Red Hat, Inc.
++ *
++ * Author: Daiki Ueno
++ *
++ * This file is part of GnuTLS.
++ *
++ * GnuTLS is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * GnuTLS is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>
++ */
++
++#ifdef HAVE_CONFIG_H
++# include <config.h>
++#endif
++
++#include <stdio.h>
++#include <stdlib.h>
++
++#include "utils.h"
++#include "cert-common.h"
++#include "eagain-common.h"
++
++/* This program tests whether forced extended master secret is
++ * negotiated as expected.
++ */
++
++const char *side;
++
++static void tls_log_func(int level, const char *str)
++{
++	fprintf(stderr, "%s|<%d>| %s", side, level, str);
++}
++
++static void
++try(const char *name, const char *sprio, const char *cprio, int serr, int cerr)
++{
++	int sret, cret;
++	gnutls_certificate_credentials_t scred, ccred;
++	gnutls_session_t server, client;
++
++	success("Running %s\n", name);
++
++	assert(gnutls_certificate_allocate_credentials(&scred) >= 0);
++
++	assert(gnutls_certificate_set_x509_key_mem
++	       (scred, &server_ca3_localhost_cert,
++		&server_ca3_key, GNUTLS_X509_FMT_PEM) >= 0);
++
++	assert(gnutls_certificate_allocate_credentials(&ccred) >= 0);
++
++	assert(gnutls_certificate_set_x509_trust_mem
++	       (ccred, &ca3_cert, GNUTLS_X509_FMT_PEM) >= 0);
++
++	assert(gnutls_init(&server, GNUTLS_SERVER) >= 0);
++	assert(gnutls_init(&client, GNUTLS_CLIENT) >= 0);
++
++	gnutls_credentials_set(server, GNUTLS_CRD_CERTIFICATE, scred);
++	gnutls_credentials_set(client, GNUTLS_CRD_CERTIFICATE, ccred);
++
++	gnutls_transport_set_push_function(server, server_push);
++	gnutls_transport_set_pull_function(server, server_pull);
++	gnutls_transport_set_ptr(server, server);
++	assert(gnutls_priority_set_direct(server, sprio, 0) >= 0);
++
++	gnutls_transport_set_push_function(client, client_push);
++	gnutls_transport_set_pull_function(client, client_pull);
++	gnutls_transport_set_ptr(client, client);
++	assert(gnutls_priority_set_direct(client, cprio, 0) >= 0);
++
++	HANDSHAKE_EXPECT(client, server, cerr, serr);
++
++	gnutls_deinit(server);
++	gnutls_deinit(client);
++	gnutls_certificate_free_credentials(scred);
++	gnutls_certificate_free_credentials(ccred);
++
++	reset_buffers();
++}
++
++#define AES_GCM "NORMAL:-VERS-ALL:+VERS-TLS1.2"
++
++void doit(void)
++{
++	gnutls_fips140_context_t fips_context;
++
++	global_init();
++
++	/* General init. */
++	gnutls_global_set_log_function(tls_log_func);
++	if (debug)
++		gnutls_global_set_log_level(2);
++
++	assert(gnutls_fips140_context_init(&fips_context) >= 0);
++
++	/* Default: EMS is requested in non-FIPS mode, while it is
++	 * required in FIPS mode.
++	 */
++	FIPS_PUSH_CONTEXT();
++	try("default", AES_GCM, AES_GCM, 0, 0);
++	FIPS_POP_CONTEXT(APPROVED);
++
++	FIPS_PUSH_CONTEXT();
++	try("both force EMS", AES_GCM ":%FORCE_SESSION_HASH",
++	    AES_GCM ":%FORCE_SESSION_HASH", 0, 0);
++	FIPS_POP_CONTEXT(APPROVED);
++
++	if (gnutls_fips140_mode_enabled()) {
++		try("neither negotiates EMS", AES_GCM ":%NO_SESSION_HASH",
++		    AES_GCM ":%NO_SESSION_HASH", GNUTLS_E_INSUFFICIENT_SECURITY,
++		    GNUTLS_E_AGAIN);
++	} else {
++		try("neither negotiates EMS", AES_GCM ":%NO_SESSION_HASH",
++		    AES_GCM ":%NO_SESSION_HASH", 0, 0);
++	}
++	/* Note that the error codes are swapped based on FIPS mode:
++	 * in FIPS mode, the server doesn't send the extension which
++	 * causes the client to not send the one either, and then the
++	 * server doesn't like the situation.  On the other hand, in
++	 * non-FIPS mode, it's the client to decide to abort the
++	 * connection.
++	 */
++	if (gnutls_fips140_mode_enabled()) {
++		try("server doesn't negotiate EMS, client forces EMS",
++		    AES_GCM ":%NO_SESSION_HASH", AES_GCM ":%FORCE_SESSION_HASH",
++		    GNUTLS_E_INSUFFICIENT_SECURITY, GNUTLS_E_AGAIN);
++	} else {
++		try("server doesn't negotiate EMS, client forces EMS",
++		    AES_GCM ":%NO_SESSION_HASH", AES_GCM ":%FORCE_SESSION_HASH",
++		    GNUTLS_E_AGAIN, GNUTLS_E_INSUFFICIENT_SECURITY);
++	}
++	try("server forces EMS, client doesn't negotiate EMS",
++	    AES_GCM ":%FORCE_SESSION_HASH", AES_GCM ":%NO_SESSION_HASH",
++	    GNUTLS_E_INSUFFICIENT_SECURITY, GNUTLS_E_AGAIN);
++
++	gnutls_fips140_context_deinit(fips_context);
++
++	gnutls_global_deinit();
++}
+-- 
+2.41.0
+

@@ -1,0 +1,220 @@
+diff --color -ruNp a/lib/accelerated/x86/aes-xts-x86-aesni.c b/lib/accelerated/x86/aes-xts-x86-aesni.c
+--- a/lib/accelerated/x86/aes-xts-x86-aesni.c	2022-03-02 12:38:09.000000000 +0100
++++ b/lib/accelerated/x86/aes-xts-x86-aesni.c	2022-11-07 14:12:38.476982750 +0100
+@@ -73,7 +73,6 @@ x86_aes_xts_cipher_setkey(void *_ctx, co
+ 	/* Check key block according to FIPS-140-2 IG A.9 */
+ 	if (_gnutls_fips_mode_enabled()){
+ 		if (gnutls_memcmp(key, key + (keysize / 2), keysize / 2) == 0) {
+-			_gnutls_switch_lib_state(LIB_STATE_ERROR);
+ 			return gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
+ 		}
+ 	}
+diff --color -ruNp a/lib/nettle/cipher.c b/lib/nettle/cipher.c
+--- a/lib/nettle/cipher.c	2022-11-07 14:10:13.672085930 +0100
++++ b/lib/nettle/cipher.c	2022-11-07 14:12:38.477982770 +0100
+@@ -448,12 +448,14 @@ _gcm_decrypt(struct nettle_cipher_ctx *c
+ 		    length, dst, src);
+ }
+ 
+-static void _des_set_key(struct des_ctx *ctx, const uint8_t *key)
++static void
++_des_set_key(struct des_ctx *ctx, const uint8_t *key)
+ {
+ 	des_set_key(ctx, key);
+ }
+ 
+-static void _des3_set_key(struct des3_ctx *ctx, const uint8_t *key)
++static void
++_des3_set_key(struct des3_ctx *ctx, const uint8_t *key)
+ {
+ 	des3_set_key(ctx, key);
+ }
+@@ -477,50 +479,6 @@ _cfb8_decrypt(struct nettle_cipher_ctx *
+ }
+ 
+ static void
+-_xts_aes128_set_encrypt_key(struct xts_aes128_key *xts_key,
+-			    const uint8_t *key)
+-{
+-	if (_gnutls_fips_mode_enabled() &&
+-	    gnutls_memcmp(key, key + AES128_KEY_SIZE, AES128_KEY_SIZE) == 0)
+-		_gnutls_switch_lib_state(LIB_STATE_ERROR);
+-
+-	xts_aes128_set_encrypt_key(xts_key, key);
+-}
+-
+-static void
+-_xts_aes128_set_decrypt_key(struct xts_aes128_key *xts_key,
+-			    const uint8_t *key)
+-{
+-	if (_gnutls_fips_mode_enabled() &&
+-	    gnutls_memcmp(key, key + AES128_KEY_SIZE, AES128_KEY_SIZE) == 0)
+-		_gnutls_switch_lib_state(LIB_STATE_ERROR);
+-
+-	xts_aes128_set_decrypt_key(xts_key, key);
+-}
+-
+-static void
+-_xts_aes256_set_encrypt_key(struct xts_aes256_key *xts_key,
+-			    const uint8_t *key)
+-{
+-	if (_gnutls_fips_mode_enabled() &&
+-	    gnutls_memcmp(key, key + AES256_KEY_SIZE, AES256_KEY_SIZE) == 0)
+-		_gnutls_switch_lib_state(LIB_STATE_ERROR);
+-
+-	xts_aes256_set_encrypt_key(xts_key, key);
+-}
+-
+-static void
+-_xts_aes256_set_decrypt_key(struct xts_aes256_key *xts_key,
+-			    const uint8_t *key)
+-{
+-	if (_gnutls_fips_mode_enabled() &&
+-	    gnutls_memcmp(key, key + AES256_KEY_SIZE, AES256_KEY_SIZE) == 0)
+-		_gnutls_switch_lib_state(LIB_STATE_ERROR);
+-
+-	xts_aes256_set_decrypt_key(xts_key, key);
+-}
+-
+-static void
+ _xts_aes128_encrypt(struct nettle_cipher_ctx *ctx, size_t length, uint8_t * dst,
+ 		    const uint8_t * src)
+ {
+@@ -1041,8 +999,8 @@ static const struct nettle_cipher_st bui
+ 	   .ctx_size = sizeof(struct xts_aes128_key),
+ 	   .encrypt = _xts_aes128_encrypt,
+ 	   .decrypt = _xts_aes128_decrypt,
+-	   .set_encrypt_key = (nettle_set_key_func*)_xts_aes128_set_encrypt_key,
+-	   .set_decrypt_key = (nettle_set_key_func*)_xts_aes128_set_decrypt_key,
++	   .set_encrypt_key = (nettle_set_key_func*)xts_aes128_set_encrypt_key,
++	   .set_decrypt_key = (nettle_set_key_func*)xts_aes128_set_decrypt_key,
+ 	   .max_iv_size = AES_BLOCK_SIZE,
+ 	},
+ 	{  .algo = GNUTLS_CIPHER_AES_256_XTS,
+@@ -1052,8 +1010,8 @@ static const struct nettle_cipher_st bui
+ 	   .ctx_size = sizeof(struct xts_aes256_key),
+ 	   .encrypt = _xts_aes256_encrypt,
+ 	   .decrypt = _xts_aes256_decrypt,
+-	   .set_encrypt_key = (nettle_set_key_func*)_xts_aes256_set_encrypt_key,
+-	   .set_decrypt_key = (nettle_set_key_func*)_xts_aes256_set_decrypt_key,
++	   .set_encrypt_key = (nettle_set_key_func*)xts_aes256_set_encrypt_key,
++	   .set_decrypt_key = (nettle_set_key_func*)xts_aes256_set_decrypt_key,
+ 	   .max_iv_size = AES_BLOCK_SIZE,
+ 	},
+ 	{  .algo = GNUTLS_CIPHER_AES_128_SIV,
+@@ -1144,6 +1102,21 @@ wrap_nettle_cipher_setkey(void *_ctx, co
+ 		return 0;
+ 	}
+ 
++	switch (ctx->cipher->algo) {
++	case GNUTLS_CIPHER_AES_128_XTS:
++		if (_gnutls_fips_mode_enabled() &&
++		    gnutls_memcmp(key, (char *)key + AES128_KEY_SIZE, AES128_KEY_SIZE) == 0)
++			return gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
++		break;
++	case GNUTLS_CIPHER_AES_256_XTS:
++		if (_gnutls_fips_mode_enabled() &&
++		    gnutls_memcmp(key, (char *)key + AES256_KEY_SIZE, AES256_KEY_SIZE) == 0)
++			return gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
++		break;
++	default:
++		break;
++	}
++
+ 	if (ctx->enc)
+ 		ctx->cipher->set_encrypt_key(ctx->ctx_ptr, key);
+ 	else
+diff --color -ruNp a/tests/Makefile.am b/tests/Makefile.am
+--- a/tests/Makefile.am	2022-11-07 14:10:13.836089211 +0100
++++ b/tests/Makefile.am	2022-11-07 14:12:38.478982790 +0100
+@@ -233,7 +233,7 @@ ctests += mini-record-2 simple gnutls_hm
+ 	 tls13-without-timeout-func buffer status-request-revoked \
+ 	 set_x509_ocsp_multi_cli kdf-api keylog-func handshake-write \
+ 	 x509cert-dntypes id-on-xmppAddr tls13-compat-mode ciphersuite-name \
+-	 x509-upnconstraint pkcs7-verify-double-free \
++	 x509-upnconstraint xts-key-check pkcs7-verify-double-free \
+ 	 fips-rsa-sizes
+ 
+ ctests += tls-channel-binding
+diff --color -ruNp a/tests/xts-key-check.c b/tests/xts-key-check.c
+--- a/tests/xts-key-check.c	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/xts-key-check.c	2022-11-07 14:12:38.478982790 +0100
+@@ -0,0 +1,78 @@
++/*
++ * Copyright (C) 2022 Red Hat, Inc.
++ *
++ * Author: Zoltan Fridrich
++ *
++ * This file is part of GnuTLS.
++ *
++ * GnuTLS is free software: you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * GnuTLS is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with GnuTLS. If not, see <https://www.gnu.org/licenses/>.
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <gnutls/crypto.h>
++
++#include "utils.h"
++
++static void test_xts_check(gnutls_cipher_algorithm_t alg)
++{
++	int ret;
++	gnutls_cipher_hd_t ctx;
++	gnutls_datum_t key, iv;
++
++	iv.size = gnutls_cipher_get_iv_size(alg);
++	iv.data = gnutls_malloc(iv.size);
++	if (iv.data == NULL)
++		fail("Error: %s\n", gnutls_strerror(GNUTLS_E_MEMORY_ERROR));
++	gnutls_memset(iv.data, 0xf0, iv.size);
++
++	key.size = gnutls_cipher_get_key_size(alg);
++	key.data = gnutls_malloc(key.size);
++	if (key.data == NULL) {
++		gnutls_free(iv.data);
++		fail("Error: %s\n", gnutls_strerror(GNUTLS_E_MEMORY_ERROR));
++	}
++	gnutls_memset(key.data, 0xf0, key.size);
++
++	ret = gnutls_cipher_init(&ctx, alg, &key, &iv);
++	if (ret == GNUTLS_E_SUCCESS) {
++		gnutls_cipher_deinit(ctx);
++		gnutls_free(iv.data);
++		gnutls_free(key.data);
++		fail("cipher initialization should fail for key1 == key2\n");
++	}
++
++	key.data[0] = 0xff;
++
++	ret = gnutls_cipher_init(&ctx, alg, &key, &iv);
++	gnutls_free(iv.data);
++	gnutls_free(key.data);
++
++	if (ret == GNUTLS_E_SUCCESS)
++		gnutls_cipher_deinit(ctx);
++	else
++		fail("cipher initialization should succeed with key1 != key2"
++		     "\n%s\n", gnutls_strerror(ret));
++}
++
++void doit(void)
++{
++	if (!gnutls_fips140_mode_enabled())
++		exit(77);
++
++	test_xts_check(GNUTLS_CIPHER_AES_128_XTS);
++	test_xts_check(GNUTLS_CIPHER_AES_256_XTS);
++}

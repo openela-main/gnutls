@@ -1,0 +1,407 @@
+From e8b35d31817d207d8b4b87ccf104d3b93aa446e0 Mon Sep 17 00:00:00 2001
+From: Daiki Ueno <ueno@gnu.org>
+Date: Mon, 17 Oct 2022 11:11:43 +0900
+Subject: [PATCH] tests: move FIPS service indicator functions to common file
+
+Signed-off-by: Daiki Ueno <ueno@gnu.org>
+---
+ tests/dh-compute.c     | 36 +++++---------------------
+ tests/fips-rsa-sizes.c | 24 -----------------
+ tests/fips-test.c      | 27 +++-----------------
+ tests/kdf-api.c        | 27 +-------------------
+ tests/pkcs12_encode.c  | 24 -----------------
+ tests/privkey-keygen.c | 24 -----------------
+ tests/utils.h          | 58 ++++++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 69 insertions(+), 151 deletions(-)
+
+diff --git a/tests/dh-compute.c b/tests/dh-compute.c
+index 828fb05e9c..6c1d5328f6 100644
+--- a/tests/dh-compute.c
++++ b/tests/dh-compute.c
+@@ -156,34 +156,10 @@ void doit(void)
+ 		{ NULL }
+ 	};
+ 
+-#define FIPS_PUSH_CONTEXT() do {					\
+-	if (gnutls_fips140_mode_enabled()) {				\
+-		ret = gnutls_fips140_push_context(fips_context);	\
+-		if (ret < 0) {						\
+-			fail("gnutls_fips140_push_context failed\n");	\
+-		}							\
+-	}								\
+-} while (0)
+-
+-#define FIPS_POP_CONTEXT(state) do {					\
+-	if (gnutls_fips140_mode_enabled()) {				\
+-		ret = gnutls_fips140_pop_context();			\
+-		if (ret < 0) {						\
+-			fail("gnutls_fips140_context_pop failed\n");	\
+-		}							\
+-		fips_state = gnutls_fips140_get_operation_state(fips_context); \
+-		if (fips_state != state) {				\
+-			fail("operation state is not %d (%d)\n",	\
+-			     state, fips_state);			\
+-		}							\
+-	}								\
+-} while (0)
+-
+ 	for (int i = 0; test_data[i].name != NULL; i++) {
+ 		gnutls_datum_t priv_key, pub_key;
+ 		gnutls_dh_params_t dh_params;
+ 		gnutls_fips140_context_t fips_context;
+-		gnutls_fips140_operation_state_t fips_state;
+ 		int ret;
+ 
+ 		if (gnutls_fips140_mode_enabled()) {
+@@ -193,24 +169,24 @@ void doit(void)
+ 			}
+ 		}
+ 
+-		FIPS_PUSH_CONTEXT();
++		fips_push_context(fips_context);
+ 		params(&dh_params, &test_data[i].prime, &test_data[i].q,
+ 		       &test_data[i].generator);
+-		FIPS_POP_CONTEXT(GNUTLS_FIPS140_OP_INITIAL);
++		fips_pop_context(fips_context, GNUTLS_FIPS140_OP_INITIAL);
+ 
+ 		success("%s genkey\n", test_data[i].name);
+ 
+-		FIPS_PUSH_CONTEXT();
++		fips_push_context(fips_context);
+ 		genkey(dh_params, &priv_key, &pub_key);
+-		FIPS_POP_CONTEXT(test_data[i].fips_state_genkey);
++		fips_pop_context(fips_context, test_data[i].fips_state_genkey);
+ 
+ 		success("%s compute_key\n", test_data[i].name);
+ 		
+-		FIPS_PUSH_CONTEXT();
++		fips_push_context(fips_context);
+ 		compute_key(test_data[i].name, dh_params, &priv_key,
+ 			    &pub_key, &test_data[i].peer_key,
+ 			    test_data[i].expected_error, NULL, 0);
+-		FIPS_POP_CONTEXT(test_data[i].fips_state_compute_key);
++		fips_pop_context(fips_context, test_data[i].fips_state_compute_key);
+ 
+ 		gnutls_dh_params_deinit(dh_params);
+ 		gnutls_free(priv_key.data);
+diff --git a/tests/fips-rsa-sizes.c b/tests/fips-rsa-sizes.c
+index 84b9affabb..5feb284503 100644
+--- a/tests/fips-rsa-sizes.c
++++ b/tests/fips-rsa-sizes.c
+@@ -27,25 +27,6 @@
+ #include <gnutls/abstract.h>
+ #include <gnutls/x509.h>
+ 
+-#define FIPS_PUSH_CONTEXT() do {				\
+-	ret = gnutls_fips140_push_context(fips_context);	\
+-	if (ret < 0) {						\
+-		fail("gnutls_fips140_push_context failed\n");	\
+-	}							\
+-} while (0)
+-
+-#define FIPS_POP_CONTEXT(state) do {					\
+-	ret = gnutls_fips140_pop_context();				\
+-	if (ret < 0) {							\
+-		fail("gnutls_fips140_context_pop failed\n");		\
+-	}								\
+-	fips_state = gnutls_fips140_get_operation_state(fips_context);	\
+-	if (fips_state != GNUTLS_FIPS140_OP_ ## state) {		\
+-		fail("operation state is not " # state " (%d)\n",	\
+-		     fips_state);					\
+-	}								\
+-} while (0)
+-
+ 
+ void generate_successfully(gnutls_privkey_t* privkey, gnutls_pubkey_t* pubkey,
+                            unsigned int size);
+@@ -63,7 +44,6 @@ void generate_successfully(gnutls_privkey_t* privkey, gnutls_pubkey_t* pubkey,
+ 	int ret;
+ 	gnutls_x509_privkey_t xprivkey;
+ 	gnutls_fips140_context_t fips_context;
+-	gnutls_fips140_operation_state_t fips_state;
+ 	assert(gnutls_fips140_context_init(&fips_context) == 0);
+ 
+ 	fprintf(stderr, "%d-bit\n", size);
+@@ -102,7 +82,6 @@ void generate_unsuccessfully(gnutls_privkey_t* privkey, gnutls_pubkey_t* pubkey,
+ 	int ret;
+ 	gnutls_x509_privkey_t xprivkey;
+ 	gnutls_fips140_context_t fips_context;
+-	gnutls_fips140_operation_state_t fips_state;
+ 	assert(gnutls_fips140_context_init(&fips_context) == 0);
+ 
+ 	fprintf(stderr, "%d-bit\n", size);
+@@ -156,7 +135,6 @@ void generate_unsuccessfully(gnutls_privkey_t* privkey, gnutls_pubkey_t* pubkey,
+ void sign_verify_successfully(gnutls_privkey_t privkey, gnutls_pubkey_t pubkey) {
+ 	int ret;
+ 	gnutls_fips140_context_t fips_context;
+-	gnutls_fips140_operation_state_t fips_state;
+ 
+ 	gnutls_datum_t signature;
+ 	gnutls_datum_t plaintext = {
+@@ -190,7 +168,6 @@ void sign_verify_unsuccessfully(gnutls_privkey_t privkey,
+                                 gnutls_pubkey_t pubkey) {
+ 	int ret;
+ 	gnutls_fips140_context_t fips_context;
+-	gnutls_fips140_operation_state_t fips_state;
+ 
+ 	gnutls_datum_t signature;
+ 	gnutls_datum_t plaintext = {
+@@ -225,7 +202,6 @@ void sign_verify_unsuccessfully(gnutls_privkey_t privkey,
+ void nosign_verify(gnutls_privkey_t privkey, gnutls_pubkey_t pubkey) {
+ 	int ret;
+ 	gnutls_fips140_context_t fips_context;
+-	gnutls_fips140_operation_state_t fips_state;
+ 
+ 	gnutls_datum_t signature;
+ 	gnutls_datum_t plaintext = {
+diff --git a/tests/fips-test.c b/tests/fips-test.c
+index f789afb107..b0bae4ef9f 100644
+--- a/tests/fips-test.c
++++ b/tests/fips-test.c
+@@ -12,25 +12,6 @@
+ /* This does check the FIPS140 support.
+  */
+ 
+-#define FIPS_PUSH_CONTEXT() do {				\
+-	ret = gnutls_fips140_push_context(fips_context);	\
+-	if (ret < 0) {						\
+-		fail("gnutls_fips140_push_context failed\n");	\
+-	}							\
+-} while (0)
+-
+-#define FIPS_POP_CONTEXT(state) do {					\
+-	ret = gnutls_fips140_pop_context();				\
+-	if (ret < 0) {							\
+-		fail("gnutls_fips140_context_pop failed\n");		\
+-	}								\
+-	fips_state = gnutls_fips140_get_operation_state(fips_context);	\
+-	if (fips_state != GNUTLS_FIPS140_OP_ ## state) {		\
+-		fail("operation state is not " # state " (%d)\n",	\
+-		     fips_state);					\
+-	}								\
+-} while (0)
+-
+ void _gnutls_lib_simulate_error(void);
+ 
+ static void tls_log_func(int level, const char *str)
+@@ -40,10 +21,9 @@ static void tls_log_func(int level, const char *str)
+ 
+ static uint8_t key16[16];
+ static uint8_t iv16[16];
+-uint8_t key_data[64];
+-uint8_t iv_data[16];
+-gnutls_fips140_context_t fips_context;
+-gnutls_fips140_operation_state_t fips_state;
++static uint8_t key_data[64];
++static uint8_t iv_data[16];
++static gnutls_fips140_context_t fips_context;
+ 
+ static const gnutls_datum_t data = { .data = (unsigned char *)"foo", 3 };
+ static const uint8_t rsa2342_sha1_sig_data[] = {
+@@ -276,6 +256,7 @@ test_ciphers(void)
+ void doit(void)
+ {
+ 	int ret;
++	gnutls_fips140_operation_state_t fips_state;
+ 	unsigned int mode;
+ 	gnutls_cipher_hd_t ch;
+ 	gnutls_hmac_hd_t mh;
+diff --git a/tests/kdf-api.c b/tests/kdf-api.c
+index 9724502005..a28ce82a62 100644
+--- a/tests/kdf-api.c
++++ b/tests/kdf-api.c
+@@ -33,30 +33,7 @@
+ #define MAX_BUF 1024
+ 
+ static gnutls_fips140_context_t fips_context;
+-static gnutls_fips140_operation_state_t fips_state;
+-
+-#define FIPS_PUSH_CONTEXT() do {					\
+-	if (gnutls_fips140_mode_enabled()) {				\
+-		ret = gnutls_fips140_push_context(fips_context);	\
+-		if (ret < 0) {						\
+-			fail("gnutls_fips140_push_context failed\n");	\
+-		}							\
+-	}								\
+-} while (0)
+-
+-#define FIPS_POP_CONTEXT(state) do {					\
+-	if (gnutls_fips140_mode_enabled()) {				\
+-		ret = gnutls_fips140_pop_context();			\
+-		if (ret < 0) {						\
+-			fail("gnutls_fips140_context_pop failed\n");	\
+-		}							\
+-		fips_state = gnutls_fips140_get_operation_state(fips_context); \
+-		if (fips_state != GNUTLS_FIPS140_OP_ ## state) {	\
+-			fail("operation state is not " # state " (%d)\n", \
+-			     fips_state);				\
+-		}							\
+-	}								\
+-} while (0)
++
+ 
+ static void
+ test_hkdf(gnutls_mac_algorithm_t mac,
+@@ -74,7 +51,6 @@ test_hkdf(gnutls_mac_algorithm_t mac,
+ 	gnutls_datum_t prk;
+ 	gnutls_datum_t okm;
+ 	uint8_t buf[MAX_BUF];
+-	int ret;
+ 
+ 	success("HKDF test with %s\n", gnutls_mac_get_name(mac));
+ 
+@@ -144,7 +120,6 @@ test_pbkdf2(gnutls_mac_algorithm_t mac,
+ 	gnutls_datum_t salt;
+ 	gnutls_datum_t okm;
+ 	uint8_t buf[MAX_BUF];
+-	int ret;
+ 
+ 	success("PBKDF2 test with %s\n", gnutls_mac_get_name(mac));
+ 
+diff --git a/tests/pkcs12_encode.c b/tests/pkcs12_encode.c
+index ea39f3d69e..dc55daccde 100644
+--- a/tests/pkcs12_encode.c
++++ b/tests/pkcs12_encode.c
+@@ -70,29 +70,6 @@ static void tls_log_func(int level, const char *str)
+ 	fprintf(stderr, "|<%d>| %s", level, str);
+ }
+ 
+-#define FIPS_PUSH_CONTEXT() do {					\
+-	if (gnutls_fips140_mode_enabled()) {				\
+-		ret = gnutls_fips140_push_context(fips_context);	\
+-		if (ret < 0) {						\
+-			fail("gnutls_fips140_push_context failed\n");	\
+-		}							\
+-	}								\
+-} while (0)
+-
+-#define FIPS_POP_CONTEXT(state) do {					\
+-	if (gnutls_fips140_mode_enabled()) {				\
+-		ret = gnutls_fips140_pop_context();			\
+-		if (ret < 0) {						\
+-			fail("gnutls_fips140_context_pop failed\n");	\
+-		}							\
+-		fips_state = gnutls_fips140_get_operation_state(fips_context); \
+-		if (fips_state != GNUTLS_FIPS140_OP_ ## state) {	\
+-			fail("operation state is not " # state " (%d)\n", \
+-			     fips_state);				\
+-		}							\
+-	}								\
+-} while (0)
+-
+ void doit(void)
+ {
+ 	gnutls_pkcs12_t pkcs12;
+@@ -106,7 +83,6 @@ void doit(void)
+ 	size_t size;
+ 	unsigned i;
+ 	gnutls_fips140_context_t fips_context;
+-	gnutls_fips140_operation_state_t fips_state;
+ 	size_t n_tests = 0;
+ 	struct tests {
+ 		const char *name;
+diff --git a/tests/privkey-keygen.c b/tests/privkey-keygen.c
+index 2766afee08..2531906d71 100644
+--- a/tests/privkey-keygen.c
++++ b/tests/privkey-keygen.c
+@@ -119,30 +119,6 @@ void doit(void)
+ 	gnutls_x509_privkey_t pkey, dst;
+ 	int ret, algorithm, i;
+ 	gnutls_fips140_context_t fips_context;
+-	gnutls_fips140_operation_state_t fips_state;
+-
+-#define FIPS_PUSH_CONTEXT() do {					\
+-	if (gnutls_fips140_mode_enabled()) {				\
+-		ret = gnutls_fips140_push_context(fips_context);	\
+-		if (ret < 0) {						\
+-			fail("gnutls_fips140_push_context failed\n");	\
+-		}							\
+-	}								\
+-} while (0)
+-
+-#define FIPS_POP_CONTEXT(state) do {					\
+-	if (gnutls_fips140_mode_enabled()) {				\
+-		ret = gnutls_fips140_pop_context();			\
+-		if (ret < 0) {						\
+-			fail("gnutls_fips140_context_pop failed\n");	\
+-		}							\
+-		fips_state = gnutls_fips140_get_operation_state(fips_context); \
+-		if (fips_state != GNUTLS_FIPS140_OP_ ## state) {	\
+-			fail("operation state is not " # state " (%d)\n", \
+-			     fips_state);				\
+-		}							\
+-	}								\
+-} while (0)
+ 
+ 	ret = global_init();
+ 	if (ret < 0)
+diff --git a/tests/utils.h b/tests/utils.h
+index d3a2ba8d16..4433a07057 100644
+--- a/tests/utils.h
++++ b/tests/utils.h
+@@ -210,4 +210,62 @@ inline static unsigned int get_dtls_retransmit_timeout(void) {
+ 	return (unsigned int) ul;
+ }
+ 
++static inline const char *
++fips_operation_state_to_string(gnutls_fips140_operation_state_t state)
++{
++	switch (state) {
++	case GNUTLS_FIPS140_OP_INITIAL:
++		return "INITIAL";
++	case GNUTLS_FIPS140_OP_APPROVED:
++		return "APPROVED";
++	case GNUTLS_FIPS140_OP_NOT_APPROVED:
++		return "NOT_APPROVED";
++	case GNUTLS_FIPS140_OP_ERROR:
++		return "ERROR";
++	default:
++		/*NOTREACHED*/
++		assert(0);
++		return NULL;
++	}
++}
++
++static inline void
++fips_push_context(gnutls_fips140_context_t context)
++{
++	if (gnutls_fips140_mode_enabled()) {
++		int ret;
++
++		ret = gnutls_fips140_push_context(context);
++		if (ret < 0) {
++			fail("gnutls_fips140_push_context failed\n");
++		}
++	}
++}
++
++static inline void
++fips_pop_context(gnutls_fips140_context_t context,
++		 gnutls_fips140_operation_state_t expected_state)
++{
++	gnutls_fips140_operation_state_t state;
++
++	if (gnutls_fips140_mode_enabled()) {
++		int ret;
++
++		ret = gnutls_fips140_pop_context();
++		if (ret < 0) {
++			fail("gnutls_fips140_context_pop failed\n");
++		}
++		state = gnutls_fips140_get_operation_state(context);
++		if (state != expected_state) {
++			fail("operation state is not %s (%s)\n",
++			     fips_operation_state_to_string(expected_state),
++			     fips_operation_state_to_string(state));
++		}
++	}
++}
++
++/* To use those convenient macros, define fips_context variable. */
++#define FIPS_PUSH_CONTEXT() fips_push_context(fips_context)
++#define FIPS_POP_CONTEXT(state) fips_pop_context(fips_context, GNUTLS_FIPS140_OP_ ## state)
++
+ #endif /* GNUTLS_TESTS_UTILS_H */
+-- 
+2.38.1
+

@@ -1,0 +1,215 @@
+diff --color -ruNp a/lib/ext/session_ticket.c b/lib/ext/session_ticket.c
+--- a/lib/ext/session_ticket.c	2022-05-10 13:55:00.000000000 +0200
++++ b/lib/ext/session_ticket.c	2022-11-15 13:30:20.491830382 +0100
+@@ -624,6 +624,12 @@ gnutls_session_ticket_enable_server(gnut
+ 	return 0;
+ }
+ 
++void
++_gnutls_session_ticket_disable_server(gnutls_session_t session)
++{
++	session->internals.flags |= GNUTLS_NO_TICKETS;
++}
++
+ /*
+  * Return zero if session tickets haven't been enabled.
+  */
+diff --color -ruNp a/lib/ext/session_ticket.h b/lib/ext/session_ticket.h
+--- a/lib/ext/session_ticket.h	2022-02-22 15:34:48.000000000 +0100
++++ b/lib/ext/session_ticket.h	2022-11-15 13:30:20.491830382 +0100
+@@ -36,5 +36,6 @@ int _gnutls_encrypt_session_ticket(gnutl
+ int _gnutls_decrypt_session_ticket(gnutls_session_t session,
+ 				   const gnutls_datum_t *ticket_data,
+ 				   gnutls_datum_t *state);
++void _gnutls_session_ticket_disable_server(gnutls_session_t session);
+ 
+ #endif /* GNUTLS_LIB_EXT_SESSION_TICKET_H */
+diff --color -ruNp a/lib/libgnutls.map b/lib/libgnutls.map
+--- a/lib/libgnutls.map	2022-11-15 13:12:57.781688194 +0100
++++ b/lib/libgnutls.map	2022-11-15 13:30:20.492830401 +0100
+@@ -1510,4 +1510,6 @@ GNUTLS_PRIVATE_3_4 {
+ 	_gnutls_buffer_clear;
+ 	# needed by tests/cipher-alignment
+ 	_gnutls_crypto_register_cipher;
++	# needed by tests/tls12-rehandshake-cert-ticket
++	_gnutls_session_ticket_disable_server;
+ } GNUTLS_3_4;
+diff --color -ruNp a/lib/state.c b/lib/state.c
+--- a/lib/state.c	2022-05-16 17:10:08.000000000 +0200
++++ b/lib/state.c	2022-11-15 13:30:20.493830420 +0100
+@@ -545,6 +545,7 @@ void _gnutls_handshake_internal_state_cl
+ 	session->internals.tfo.connect_addrlen = 0;
+ 	session->internals.tfo.connect_only = 0;
+ 	session->internals.early_data_received = 0;
++	session->internals.session_ticket_renew = 0;
+ }
+ 
+ /**
+diff --color -ruNp a/tests/Makefile.am b/tests/Makefile.am
+--- a/tests/Makefile.am	2022-11-15 13:12:58.209696462 +0100
++++ b/tests/Makefile.am	2022-11-15 13:30:20.494830440 +0100
+@@ -234,7 +234,7 @@ ctests += mini-record-2 simple gnutls_hm
+ 	 set_x509_ocsp_multi_cli kdf-api keylog-func handshake-write \
+ 	 x509cert-dntypes id-on-xmppAddr tls13-compat-mode ciphersuite-name \
+ 	 x509-upnconstraint xts-key-check pkcs7-verify-double-free \
+-	 fips-rsa-sizes
++	 fips-rsa-sizes tls12-rehandshake-ticket
+ 
+ ctests += tls-channel-binding
+ 
+diff --color -ruNp a/tests/tls12-rehandshake-ticket.c b/tests/tls12-rehandshake-ticket.c
+--- a/tests/tls12-rehandshake-ticket.c	1970-01-01 01:00:00.000000000 +0100
++++ b/tests/tls12-rehandshake-ticket.c	2022-11-15 13:30:20.495830459 +0100
+@@ -0,0 +1,152 @@
++/*
++ * Copyright (C) 2022 Red Hat, Inc.
++ *
++ * Author: Daiki Ueno
++ *
++ * This file is part of GnuTLS.
++ *
++ * GnuTLS is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * GnuTLS is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * along with this program.  If not, see <https://www.gnu.org/licenses/>
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <gnutls/gnutls.h>
++#include <assert.h>
++#include "cert-common.h"
++
++#include "utils.h"
++#include "eagain-common.h"
++
++const char *side = "";
++
++static void tls_log_func(int level, const char *str)
++{
++	fprintf(stderr, "%s|<%d>| %s", side, level, str);
++}
++
++#define MAX_BUF 1024
++
++void _gnutls_session_ticket_disable_server(gnutls_session_t session);
++
++static void run(void)
++{
++	char buffer[MAX_BUF + 1];
++	/* Server stuff. */
++	gnutls_certificate_credentials_t scred;
++	gnutls_session_t server;
++	gnutls_datum_t session_ticket_key = { NULL, 0 };
++	int sret;
++	/* Client stuff. */
++	gnutls_certificate_credentials_t ccred;
++	gnutls_session_t client;
++	int cret;
++
++	/* General init. */
++	global_init();
++	gnutls_global_set_log_function(tls_log_func);
++	if (debug)
++		gnutls_global_set_log_level(9);
++
++	/* Init server */
++	assert(gnutls_certificate_allocate_credentials(&scred) >= 0);
++	assert(gnutls_certificate_set_x509_key_mem(scred,
++						   &server_ca3_localhost_cert,
++						   &server_ca3_key,
++						   GNUTLS_X509_FMT_PEM) >= 0);
++	assert(gnutls_certificate_set_x509_trust_mem(scred,
++						     &ca3_cert,
++						     GNUTLS_X509_FMT_PEM) >= 0);
++
++	assert(gnutls_init(&server, GNUTLS_SERVER) >= 0);
++	gnutls_certificate_server_set_request(server, GNUTLS_CERT_REQUEST);
++	assert(gnutls_priority_set_direct(server,
++					  "NORMAL:-VERS-TLS-ALL:+VERS-TLS1.1:+VERS-TLS1.2",
++					  NULL) >= 0);
++
++	gnutls_credentials_set(server, GNUTLS_CRD_CERTIFICATE, scred);
++	gnutls_transport_set_push_function(server, server_push);
++	gnutls_transport_set_pull_function(server, server_pull);
++	gnutls_transport_set_ptr(server, server);
++
++	gnutls_session_ticket_key_generate(&session_ticket_key);
++	gnutls_session_ticket_enable_server(server, &session_ticket_key);
++
++	/* Init client */
++	assert(gnutls_certificate_allocate_credentials(&ccred) >= 0);
++	assert(gnutls_certificate_set_x509_key_mem
++	       (ccred, &cli_ca3_cert_chain, &cli_ca3_key, GNUTLS_X509_FMT_PEM) >= 0);
++	assert(gnutls_certificate_set_x509_trust_mem
++	       (ccred, &ca3_cert, GNUTLS_X509_FMT_PEM) >= 0);
++
++	gnutls_init(&client, GNUTLS_CLIENT);
++	assert(gnutls_priority_set_direct(client,
++					  "NORMAL:-VERS-TLS-ALL:+VERS-TLS1.1:+VERS-TLS1.2",
++					  NULL) >= 0);
++
++	assert(gnutls_credentials_set(client, GNUTLS_CRD_CERTIFICATE, ccred) >= 0);
++
++	gnutls_transport_set_push_function(client, client_push);
++	gnutls_transport_set_pull_function(client, client_pull);
++	gnutls_transport_set_ptr(client, client);
++
++	HANDSHAKE(client, server);
++
++	/* Server initiates rehandshake */
++	switch_side("server");
++	sret = gnutls_rehandshake(server);
++	if (sret < 0) {
++		fail("Error sending %d byte packet: %s\n",
++		     (int)sizeof(buffer), gnutls_strerror(sret));
++	} else if (debug)
++		success("server: starting rehandshake\n");
++
++	/* Stop sending session ticket */
++	_gnutls_session_ticket_disable_server(server);
++
++	/* Client gets notified with rehandshake */
++	switch_side("client");
++	do {
++		do {
++			cret = gnutls_record_recv(client, buffer, MAX_BUF);
++		} while (cret == GNUTLS_E_AGAIN || cret == GNUTLS_E_INTERRUPTED);
++	} while (cret > 0);
++
++	if (cret != GNUTLS_E_REHANDSHAKE) {
++		fail("client: Error receiving rehandshake: %s\n",
++		     gnutls_strerror(cret));
++	}
++
++	HANDSHAKE(client, server);
++
++	gnutls_bye(client, GNUTLS_SHUT_WR);
++	gnutls_bye(server, GNUTLS_SHUT_WR);
++
++	gnutls_deinit(client);
++	gnutls_deinit(server);
++
++	gnutls_certificate_free_credentials(scred);
++	gnutls_certificate_free_credentials(ccred);
++
++	gnutls_free(session_ticket_key.data);
++
++	gnutls_global_deinit();
++	reset_buffers();
++}
++
++void doit(void)
++{
++	run();
++}
