@@ -1,5 +1,5 @@
 Version:	3.6.16
-Release: 7%{?dist}
+Release: 8%{?dist}.1
 Patch1:	gnutls-3.2.7-rpath.patch
 Patch2:	gnutls-3.6.4-no-now-guile.patch
 Patch3:	gnutls-3.6.13-enable-intel-cet.patch
@@ -12,6 +12,8 @@ Patch15:	gnutls-3.6.16-pkcs7-verify.patch
 Patch16:	gnutls-3.6.16-cpuid.patch
 Patch17:	gnutls-3.7.8-rsa-kx-timing.patch
 Patch18:	gnutls-3.6.16-rehandshake-tickets.patch
+Patch19:	gnutls-3.6.16-rsa-psk-timing.patch
+Patch20:	gnutls-3.6.16-rsa-psk-timing-followup.patch
 %bcond_without dane
 %if 0%{?rhel}
 %bcond_with guile
@@ -296,6 +298,12 @@ fi
 %endif
 
 %changelog
+* Thu Jan 18 2024 Daiki Ueno <dueno@redhat.com> - 3.6.16-8.1
+- auth/rsa-psk: minimize branching after decryption (RHEL-21586)
+
+* Wed Dec  6 2023 Daiki Ueno <dueno@redhat.com> - 3.6.16-8
+- auth/rsa_psk: side-step potential side-channel (RHEL-16753)
+
 * Mon Jun 26 2023 Daiki Ueno <dueno@redhat.com> - 3.6.16-7
 - Clear server's session ticket indication at rehandshake (#2089817)
 
