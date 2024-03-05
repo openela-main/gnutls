@@ -13,7 +13,7 @@ print(string.sub(hash, 0, 16))
 }
 
 Version: 3.7.6
-Release: 23%{?dist}
+Release: 23%{?dist}.3
 # not upstreamed
 Patch: gnutls-3.6.7-no-now-guile.patch
 Patch: gnutls-3.2.7-rpath.patch
@@ -42,6 +42,10 @@ Patch: gnutls-3.7.8-rsa-kx-timing.patch
 Patch: gnutls-3.7.8-fips-pct-dh.patch
 Patch: gnutls-3.7.6-fips-ems.patch
 Patch: gnutls-3.7.6-fips-sha1-sigver.patch
+Patch: gnutls-3.7.6-rsa-psk-timing.patch
+Patch: gnutls-3.7.6-rsa-psk-timing-followup.patch
+Patch: gnutls-3.7.6-ca-xsigned.patch
+Patch: gnutls-3.7.6-fips-integrity-zeroize.patch
 
 # not upstreamed
 Patch: gnutls-3.7.3-disable-config-reload.patch
@@ -421,6 +425,16 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
+* Wed Jan 17 2024 Daiki Ueno <dueno@redhat.com> - 3.7.6-23.3
+- x509: detect loop in certificate chain (RHEL-21759)
+- fips: Zeroize temporary values in integrity check (RHEL-21870)
+
+* Wed Jan 10 2024 Daiki Ueno <dueno@redhat.com> - 3.7.6-23.2
+- auth/rsa_psk: minimize branching after decryption
+
+* Mon Dec 11 2023 Daiki Ueno <dueno@redhat.com> - 3.7.6-23.1
+- auth/rsa_psk: side-step potential side-channel (RHEL-16755)
+
 * Sat Jul 29 2023 Daiki Ueno <dueno@redhat.com> - 3.7.6-23
 - Mark SHA-1 signature verification non-approved in FIPS (#2102751)
 

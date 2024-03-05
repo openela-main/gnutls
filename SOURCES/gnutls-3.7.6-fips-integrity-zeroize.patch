@@ -1,0 +1,40 @@
+From 65911d48d49116a6ba49402824864e5f2f3ac1e1 Mon Sep 17 00:00:00 2001
+From: Clemens Lang <cllang@redhat.com>
+Date: Fri, 12 Jan 2024 11:12:14 +0100
+Subject: [PATCH] fips: Zeroize temporary values
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The standard says "temporary value(s) generated during the integrity
+test of the module's software […] shall be zeroised from the module upon
+completion of the integrity test".
+
+That includes the computed HMAC value, which is currently not zeroized
+after the test. Add explicit calls to gnutls_memset() to fix that.
+
+Signed-off-by: Clemens Lang <cllang@redhat.com>
+---
+ lib/fips.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/lib/fips.c b/lib/fips.c
+index e9c27f6df6..8f4ff22fb9 100644
+--- a/lib/fips.c
++++ b/lib/fips.c
+@@ -380,10 +380,12 @@ static int check_lib_hmac(struct hmac_entry *entry,
+ 
+ 	if (gnutls_memcmp(entry->hmac, hmac, HMAC_SIZE)) {
+ 		_gnutls_debug_log("Calculated MAC for %s does not match\n", path);
++		gnutls_memset(hmac, 0, HMAC_SIZE);
+ 		return gnutls_assert_val(GNUTLS_E_PARSING_ERROR);
+ 	}
+ 	_gnutls_debug_log("Successfully verified MAC for %s\n", path);
+ 
++	gnutls_memset(hmac, 0, HMAC_SIZE);
+ 	return 0;
+ }
+ 
+-- 
+2.43.0
+
