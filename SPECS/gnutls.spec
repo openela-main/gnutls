@@ -1,5 +1,5 @@
 Version:	3.6.16
-Release: 8%{?dist}.1
+Release: 8%{?dist}.3
 Patch1:	gnutls-3.2.7-rpath.patch
 Patch2:	gnutls-3.6.4-no-now-guile.patch
 Patch3:	gnutls-3.6.13-enable-intel-cet.patch
@@ -14,6 +14,7 @@ Patch17:	gnutls-3.7.8-rsa-kx-timing.patch
 Patch18:	gnutls-3.6.16-rehandshake-tickets.patch
 Patch19:	gnutls-3.6.16-rsa-psk-timing.patch
 Patch20:	gnutls-3.6.16-rsa-psk-timing-followup.patch
+Patch21:	gnutls-3.6.16-deterministic-ecdsa-fixes.patch
 %bcond_without dane
 %if 0%{?rhel}
 %bcond_with guile
@@ -298,6 +299,12 @@ fi
 %endif
 
 %changelog
+* Tue Mar 26 2024 Daiki Ueno <dueno@redhat.com> - 3.6.16-8.3
+- Fix memleak with older GMP (RHEL-28957)
+
+* Mon Mar 25 2024 Daiki Ueno <dueno@redhat.com> - 3.6.16-8.2
+- Fix timing side-channel in deterministic ECDSA (RHEL-28957)
+
 * Thu Jan 18 2024 Daiki Ueno <dueno@redhat.com> - 3.6.16-8.1
 - auth/rsa-psk: minimize branching after decryption (RHEL-21586)
 
