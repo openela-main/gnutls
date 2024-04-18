@@ -13,7 +13,7 @@ print(string.sub(hash, 0, 16))
 }
 
 Version: 3.7.6
-Release: 23%{?dist}.3
+Release: 23%{?dist}.4
 # not upstreamed
 Patch: gnutls-3.6.7-no-now-guile.patch
 Patch: gnutls-3.2.7-rpath.patch
@@ -46,6 +46,8 @@ Patch: gnutls-3.7.6-rsa-psk-timing.patch
 Patch: gnutls-3.7.6-rsa-psk-timing-followup.patch
 Patch: gnutls-3.7.6-ca-xsigned.patch
 Patch: gnutls-3.7.6-fips-integrity-zeroize.patch
+Patch: gnutls-3.7.6-deterministic-ecdsa-fixes.patch
+Patch: gnutls-3.7.6-verify-chain.patch
 
 # not upstreamed
 Patch: gnutls-3.7.3-disable-config-reload.patch
@@ -425,6 +427,10 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
+* Fri Mar 29 2024 Daiki Ueno <dueno@redhat.com> - 3.7.6-23.4
+- Fix timing side-channel in deterministic ECDSA (RHEL-28958)
+- Fix potential crash during chain building/verification (RHEL-28953)
+
 * Wed Jan 17 2024 Daiki Ueno <dueno@redhat.com> - 3.7.6-23.3
 - x509: detect loop in certificate chain (RHEL-21759)
 - fips: Zeroize temporary values in integrity check (RHEL-21870)
