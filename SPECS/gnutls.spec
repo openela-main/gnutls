@@ -12,49 +12,21 @@ sha256sum:close()
 print(string.sub(hash, 0, 16))
 }
 
-Version: 3.7.6
-Release: 23%{?dist}.4
+Version: 3.8.3
+Release: 1%{?dist}
 # not upstreamed
-Patch: gnutls-3.6.7-no-now-guile.patch
 Patch: gnutls-3.2.7-rpath.patch
 Patch: gnutls-3.7.2-enable-intel-cet.patch
 Patch: gnutls-3.7.2-no-explicit-init.patch
-
-# upstreamed
-Patch: gnutls-3.7.6-fips-run-selftests.patch
-Patch: gnutls-3.7.6-ktls-disable-by-default.patch
-Patch: gnutls-3.7.6-ktls-fixes.patch
-Patch: gnutls-3.7.6-aes-gcm-pt-limit.patch
-Patch: gnutls-3.7.6-pkcs7-verify.patch
-Patch: gnutls-3.7.6-fips-pkcs12-des-cbc.patch
-Patch: gnutls-3.7.6-fips-rsa-key-sizes.patch
-Patch: gnutls-3.7.6-fips-symkey-limit.patch
-Patch: gnutls-3.7.6-fips-ecdsa-hash-check.patch
-Patch: gnutls-3.7.8-xts-key-check.patch
-Patch: gnutls-3.7.8-clear-session-ticket.patch
-Patch: gnutls-3.7.7-aes-cbc-padding-support.patch
-Patch: gnutls-3.7.8-integrity-check.patch
-Patch: gnutls-3.7.6-fips-service-indicator-test-functions.patch
-Patch: gnutls-3.7.6-fips-ccm-taglen.patch
-Patch: gnutls-3.7.6-fips-rsa-pss-saltlen.patch
-Patch: gnutls-3.7.8-revert-hmac-name.patch
-Patch: gnutls-3.7.8-rsa-kx-timing.patch
-Patch: gnutls-3.7.8-fips-pct-dh.patch
-Patch: gnutls-3.7.6-fips-ems.patch
-Patch: gnutls-3.7.6-fips-sha1-sigver.patch
-Patch: gnutls-3.7.6-rsa-psk-timing.patch
-Patch: gnutls-3.7.6-rsa-psk-timing-followup.patch
-Patch: gnutls-3.7.6-ca-xsigned.patch
-Patch: gnutls-3.7.6-fips-integrity-zeroize.patch
-Patch: gnutls-3.7.6-deterministic-ecdsa-fixes.patch
-Patch: gnutls-3.7.6-verify-chain.patch
-
-# not upstreamed
 Patch: gnutls-3.7.3-disable-config-reload.patch
 Patch: gnutls-3.7.3-fips-dsa-post.patch
 Patch: gnutls-3.7.6-drbg-reseed.patch
-Patch: gnutls-3.7.6-cpuid-fixes.patch
+Patch: gnutls-3.7.6-fips-sha1-sigver.patch
 Patch: gnutls-3.7.6-gmp-static.patch
+Patch: gnutls-3.7.8-ktls_skip_tls12_chachapoly_test.patch
+
+# upstreamed
+Patch: gnutls-3.8.3-ktls-utsname.patch
 
 %bcond_without bootstrap
 %bcond_without dane
@@ -70,6 +42,8 @@ Patch: gnutls-3.7.6-gmp-static.patch
 %bcond_with gost
 %bcond_with certificate_compression
 %bcond_without tests
+%bcond_without srp
+%bcond_without heartbeat
 
 Summary: A TLS protocol implementation
 Name: gnutls
@@ -84,7 +58,7 @@ BuildRequires: zlib-devel, brotli-devel, libzstd-devel
 BuildRequires: automake, autoconf, gperf, libtool
 %endif
 BuildRequires: texinfo
-BuildRequires: nettle-devel >= 3.5.1
+BuildRequires: nettle-devel >= 3.9.1
 %if %{with tpm12}
 BuildRequires: trousers-devel >= 0.3.11.2
 %endif
@@ -102,7 +76,7 @@ BuildRequires: p11-kit-trust, ca-certificates
 Requires: crypto-policies
 Requires: p11-kit-trust
 Requires: libtasn1 >= 4.3
-Requires: nettle >= 3.4.1
+Requires: nettle >= 3.9.1
 %if %{with tpm12}
 Recommends: trousers >= 0.3.11.2
 %endif
@@ -115,9 +89,9 @@ BuildRequires: guile22-devel
 %endif
 BuildRequires: make
 URL: http://www.gnutls.org/
-Source0: https://www.gnupg.org/ftp/gcrypt/gnutls/v3.7/%{name}-%{version}.tar.xz
-Source1: https://www.gnupg.org/ftp/gcrypt/gnutls/v3.7/%{name}-%{version}.tar.xz.sig
-Source2: gnutls-release-keyring.gpg
+Source0: https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/%{name}-%{version}.tar.xz
+Source1: https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/%{name}-%{version}.tar.xz.sig
+Source2: gnutls-release-keyring.pgp
 
 Source100:	gmp-6.2.1.tar.xz
 # Taken from the main gmp package
@@ -276,6 +250,16 @@ export FIPS_MODULE_NAME="$OS_NAME ${OS_VERSION_ID%%.*} %name"
 %else
 	   --disable-gost \
 %endif
+%if %{with srp}
+           --enable-srp-authentication \
+%else
+           --disable-srp-authentication \
+%endif
+%if %{with heartbeat}
+           --enable-heartbeat-support \
+%else
+           --disable-heartbeat-support \
+%endif
 	   --enable-sha1-support \
            --disable-static \
            --disable-openssl-compatibility \
@@ -361,17 +345,19 @@ ln -s ".$fname.hmac" "$RPM_BUILD_ROOT%{_libdir}/.libgnutls.so.30.hmac"
 %check
 %if %{with tests}
 
-xfail_tests=
+# This test shouldn't work until the kernel gets support for KeyUpdate
+xfail_tests=ktls_keyupdate.sh
 
-# With older kernel, key installation fails if the host is x86_64 and
-# the package is built with -m32:
-%ifarch %{ix86}
+# The ktls.sh test currently only supports kernel 5.11+.  This needs to
+# be checked at run time, as the koji builder might be using a different
+# version of kernel on the host than the one indicated by the
+# kernel-devel package.
+
 case "$(uname -r)" in
-  4.*.x86_64)
+  4.* | 5.[0-9].* | 5.10.* )
     xfail_tests="$xfail_tests ktls.sh"
     ;;
 esac
-%endif
 
 make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$xfail_tests"
 %endif
@@ -427,19 +413,18 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
-* Fri Mar 29 2024 Daiki Ueno <dueno@redhat.com> - 3.7.6-23.4
-- Fix timing side-channel in deterministic ECDSA (RHEL-28958)
-- Fix potential crash during chain building/verification (RHEL-28953)
+* Tue Jan 23 2024 Daiki Ueno <dueno@redhat.com> - 3.8.3-1
+- Update to gnutls 3.8.3 (RHEL-14891)
 
-* Wed Jan 17 2024 Daiki Ueno <dueno@redhat.com> - 3.7.6-23.3
-- x509: detect loop in certificate chain (RHEL-21759)
-- fips: Zeroize temporary values in integrity check (RHEL-21870)
+* Mon Jan 22 2024 Daiki Ueno <dueno@redhat.com> - 3.8.2-3
+- Skip KTLS test exercising ChaCha20-Poly1305 in TLS 1.3 as well (RHEL-18498)
 
-* Wed Jan 10 2024 Daiki Ueno <dueno@redhat.com> - 3.7.6-23.2
-- auth/rsa_psk: minimize branching after decryption
+* Fri Dec  8 2023 Daiki Ueno <dueno@redhat.com> - 3.8.2-2
+- Bump nettle dependency to 3.9.1
+- Skip KTLS test exercising ChaCha20-Poly1305 in TLS 1.2 (RHEL-18498)
 
-* Mon Dec 11 2023 Daiki Ueno <dueno@redhat.com> - 3.7.6-23.1
-- auth/rsa_psk: side-step potential side-channel (RHEL-16755)
+* Thu Nov 16 2023 Daiki Ueno <dueno@redhat.com> - 3.8.2-1
+- Update to gnutls 3.8.2 (RHEL-14891)
 
 * Sat Jul 29 2023 Daiki Ueno <dueno@redhat.com> - 3.7.6-23
 - Mark SHA-1 signature verification non-approved in FIPS (#2102751)

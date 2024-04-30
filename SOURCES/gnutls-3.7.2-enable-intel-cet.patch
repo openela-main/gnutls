@@ -1,26 +1,28 @@
-From 71b1812bf9a785b66e3f17175580d3d20cea9c0c Mon Sep 17 00:00:00 2001
-From: Daiki Ueno <ueno@gnu.org>
-Date: Tue, 12 Oct 2021 13:33:31 +0200
-Subject: [PATCH] x86: port Intel CET support
+From 1688e614451ac93a95702d49461c9971351ee614 Mon Sep 17 00:00:00 2001
+From: rpm-build <rpm-build>
+Date: Thu, 16 Nov 2023 17:01:57 +0900
+Subject: [PATCH] gnutls-3.7.2-enable-intel-cet.patch
 
-Signed-off-by: Daiki Ueno <ueno@gnu.org>
+Signed-off-by: rpm-build <rpm-build>
 ---
- lib/accelerated/x86/elf/aes-ssse3-x86.s       | 30 ++++++++++++++
- lib/accelerated/x86/elf/aes-ssse3-x86_64.s    | 26 +++++++++++++
- lib/accelerated/x86/elf/aesni-gcm-x86_64.s    | 21 ++++++++++
- lib/accelerated/x86/elf/aesni-x86.s           | 39 +++++++++++++++++++
- lib/accelerated/x86/elf/aesni-x86_64.s        | 32 +++++++++++++++
- lib/accelerated/x86/elf/ghash-x86_64.s        | 27 +++++++++++++
- lib/accelerated/x86/elf/sha1-ssse3-x86.s      | 18 +++++++++
- lib/accelerated/x86/elf/sha1-ssse3-x86_64.s   | 21 ++++++++++
- lib/accelerated/x86/elf/sha256-ssse3-x86.s    | 18 +++++++++
- lib/accelerated/x86/elf/sha256-ssse3-x86_64.s | 21 ++++++++++
- lib/accelerated/x86/elf/sha512-ssse3-x86.s    | 18 +++++++++
- lib/accelerated/x86/elf/sha512-ssse3-x86_64.s | 21 ++++++++++
- 12 files changed, 292 insertions(+)
+ lib/accelerated/x86/elf/aes-ssse3-x86.s       |  30 ++
+ lib/accelerated/x86/elf/aes-ssse3-x86_64.s    |  26 ++
+ lib/accelerated/x86/elf/aesni-gcm-x86_64.s    |  21 ++
+ lib/accelerated/x86/elf/aesni-x86.s           |  39 +++
+ lib/accelerated/x86/elf/aesni-x86_64.s        |  32 ++
+ lib/accelerated/x86/elf/e_padlock-x86.s       | 306 ++++++++++--------
+ lib/accelerated/x86/elf/e_padlock-x86_64.s    | 242 +++++++++-----
+ lib/accelerated/x86/elf/ghash-x86_64.s        |  27 ++
+ lib/accelerated/x86/elf/sha1-ssse3-x86.s      |  18 ++
+ lib/accelerated/x86/elf/sha1-ssse3-x86_64.s   |  21 ++
+ lib/accelerated/x86/elf/sha256-ssse3-x86.s    |  18 ++
+ lib/accelerated/x86/elf/sha256-ssse3-x86_64.s |  21 ++
+ lib/accelerated/x86/elf/sha512-ssse3-x86.s    |  18 ++
+ lib/accelerated/x86/elf/sha512-ssse3-x86_64.s |  21 ++
+ 14 files changed, 625 insertions(+), 215 deletions(-)
 
 diff --git a/lib/accelerated/x86/elf/aes-ssse3-x86.s b/lib/accelerated/x86/elf/aes-ssse3-x86.s
-index 265e28a7ef..7be53059f7 100644
+index 265e28a..7be5305 100644
 --- a/lib/accelerated/x86/elf/aes-ssse3-x86.s
 +++ b/lib/accelerated/x86/elf/aes-ssse3-x86.s
 @@ -71,6 +71,7 @@
@@ -150,7 +152,7 @@ index 265e28a7ef..7be53059f7 100644
 +
  .section .note.GNU-stack,"",%progbits
 diff --git a/lib/accelerated/x86/elf/aes-ssse3-x86_64.s b/lib/accelerated/x86/elf/aes-ssse3-x86_64.s
-index ea1216baf7..5a3f336f26 100644
+index ea1216b..5a3f336 100644
 --- a/lib/accelerated/x86/elf/aes-ssse3-x86_64.s
 +++ b/lib/accelerated/x86/elf/aes-ssse3-x86_64.s
 @@ -635,6 +635,7 @@ _vpaes_schedule_mangle:
@@ -221,7 +223,7 @@ index ea1216baf7..5a3f336f26 100644
  
  .section .note.GNU-stack,"",%progbits
 diff --git a/lib/accelerated/x86/elf/aesni-gcm-x86_64.s b/lib/accelerated/x86/elf/aesni-gcm-x86_64.s
-index 461dd026b9..ea5398bc2c 100644
+index 461dd02..ea5398b 100644
 --- a/lib/accelerated/x86/elf/aesni-gcm-x86_64.s
 +++ b/lib/accelerated/x86/elf/aesni-gcm-x86_64.s
 @@ -826,5 +826,26 @@ aesni_gcm_encrypt:
@@ -252,7 +254,7 @@ index 461dd026b9..ea5398bc2c 100644
  
  .section .note.GNU-stack,"",%progbits
 diff --git a/lib/accelerated/x86/elf/aesni-x86.s b/lib/accelerated/x86/elf/aesni-x86.s
-index 6e4860209f..f41d5f9ef3 100644
+index 0c13b39..3ec4a23 100644
 --- a/lib/accelerated/x86/elf/aesni-x86.s
 +++ b/lib/accelerated/x86/elf/aesni-x86.s
 @@ -43,6 +43,7 @@
@@ -433,7 +435,7 @@ index 6e4860209f..f41d5f9ef3 100644
  	movl	12(%esp),%edx
 @@ -3275,4 +3297,21 @@ aesni_set_decrypt_key:
  .byte	115,108,46,111,114,103,62,0
- .comm	_gnutls_x86_cpuid_s,16,4
+ .comm	GNUTLS_x86_cpuid_s,16,4
  
 +	.section ".note.gnu.property", "a"
 +	.p2align 2
@@ -454,7 +456,7 @@ index 6e4860209f..f41d5f9ef3 100644
 +
  .section .note.GNU-stack,"",%progbits
 diff --git a/lib/accelerated/x86/elf/aesni-x86_64.s b/lib/accelerated/x86/elf/aesni-x86_64.s
-index acc7c2c555..e3f9d5a995 100644
+index b844198..7edf5f1 100644
 --- a/lib/accelerated/x86/elf/aesni-x86_64.s
 +++ b/lib/accelerated/x86/elf/aesni-x86_64.s
 @@ -44,6 +44,7 @@
@@ -572,285 +574,8 @@ index acc7c2c555..e3f9d5a995 100644
 +4:
  
  .section .note.GNU-stack,"",%progbits
-diff --git a/lib/accelerated/x86/elf/ghash-x86_64.s b/lib/accelerated/x86/elf/ghash-x86_64.s
-index 1e4d18b341..8da3f294c7 100644
---- a/lib/accelerated/x86/elf/ghash-x86_64.s
-+++ b/lib/accelerated/x86/elf/ghash-x86_64.s
-@@ -45,6 +45,7 @@
- .align	16
- gcm_gmult_4bit:
- .cfi_startproc	
-+.byte	243,15,30,250
- 	pushq	%rbx
- .cfi_adjust_cfa_offset	8
- .cfi_offset	%rbx,-16
-@@ -156,6 +157,7 @@ gcm_gmult_4bit:
- .align	16
- gcm_ghash_4bit:
- .cfi_startproc	
-+.byte	243,15,30,250
- 	pushq	%rbx
- .cfi_adjust_cfa_offset	8
- .cfi_offset	%rbx,-16
-@@ -903,6 +905,7 @@ gcm_init_clmul:
- .align	16
- gcm_gmult_clmul:
- .cfi_startproc	
-+.byte	243,15,30,250
- .L_gmult_clmul:
- 	movdqu	(%rdi),%xmm0
- 	movdqa	.Lbswap_mask(%rip),%xmm5
-@@ -956,6 +959,7 @@ gcm_gmult_clmul:
- .align	32
- gcm_ghash_clmul:
- .cfi_startproc	
-+.byte	243,15,30,250
- .L_ghash_clmul:
- 	movdqa	.Lbswap_mask(%rip),%xmm10
- 
-@@ -1450,6 +1454,7 @@ gcm_init_avx:
- .align	32
- gcm_gmult_avx:
- .cfi_startproc	
-+.byte	243,15,30,250
- 	jmp	.L_gmult_clmul
- .cfi_endproc	
- .size	gcm_gmult_avx,.-gcm_gmult_avx
-@@ -1458,6 +1463,7 @@ gcm_gmult_avx:
- .align	32
- gcm_ghash_avx:
- .cfi_startproc	
-+.byte	243,15,30,250
- 	vzeroupper
- 
- 	vmovdqu	(%rdi),%xmm10
-@@ -1884,5 +1890,26 @@ gcm_ghash_avx:
- 
- .byte	71,72,65,83,72,32,102,111,114,32,120,56,54,95,54,52,44,32,67,82,89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112,114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
- .align	64
-+	.section ".note.gnu.property", "a"
-+	.p2align 3
-+	.long 1f - 0f
-+	.long 4f - 1f
-+	.long 5
-+0:
-+	# "GNU" encoded with .byte, since .asciz isn't supported
-+	# on Solaris.
-+	.byte 0x47
-+	.byte 0x4e
-+	.byte 0x55
-+	.byte 0
-+1:
-+	.p2align 3
-+	.long 0xc0000002
-+	.long 3f - 2f
-+2:
-+	.long 3
-+3:
-+	.p2align 3
-+4:
- 
- .section .note.GNU-stack,"",%progbits
-diff --git a/lib/accelerated/x86/elf/sha1-ssse3-x86.s b/lib/accelerated/x86/elf/sha1-ssse3-x86.s
-index 8bfbcb6b39..57b6ba58f6 100644
---- a/lib/accelerated/x86/elf/sha1-ssse3-x86.s
-+++ b/lib/accelerated/x86/elf/sha1-ssse3-x86.s
-@@ -43,6 +43,7 @@
- .align	16
- sha1_block_data_order:
- .L_sha1_block_data_order_begin:
-+.byte	243,15,30,251
- 	pushl	%ebp
- 	pushl	%ebx
- 	pushl	%esi
-@@ -1417,4 +1418,21 @@ sha1_block_data_order:
- .byte	89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112
- .byte	114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
- 
-+	.section ".note.gnu.property", "a"
-+	.p2align 2
-+	.long 1f - 0f
-+	.long 4f - 1f
-+	.long 5
-+0:
-+	.asciz "GNU"
-+1:
-+	.p2align 2
-+	.long 0xc0000002
-+	.long 3f - 2f
-+2:
-+	.long 3
-+3:
-+	.p2align 2
-+4:
-+
- .section .note.GNU-stack,"",%progbits
-diff --git a/lib/accelerated/x86/elf/sha1-ssse3-x86_64.s b/lib/accelerated/x86/elf/sha1-ssse3-x86_64.s
-index d34f34497c..54095050c8 100644
---- a/lib/accelerated/x86/elf/sha1-ssse3-x86_64.s
-+++ b/lib/accelerated/x86/elf/sha1-ssse3-x86_64.s
-@@ -5487,5 +5487,26 @@ K_XX_XX:
- .byte	0xf,0xe,0xd,0xc,0xb,0xa,0x9,0x8,0x7,0x6,0x5,0x4,0x3,0x2,0x1,0x0
- .byte	83,72,65,49,32,98,108,111,99,107,32,116,114,97,110,115,102,111,114,109,32,102,111,114,32,120,56,54,95,54,52,44,32,67,82,89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112,114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
- .align	64
-+	.section ".note.gnu.property", "a"
-+	.p2align 3
-+	.long 1f - 0f
-+	.long 4f - 1f
-+	.long 5
-+0:
-+	# "GNU" encoded with .byte, since .asciz isn't supported
-+	# on Solaris.
-+	.byte 0x47
-+	.byte 0x4e
-+	.byte 0x55
-+	.byte 0
-+1:
-+	.p2align 3
-+	.long 0xc0000002
-+	.long 3f - 2f
-+2:
-+	.long 3
-+3:
-+	.p2align 3
-+4:
- 
- .section .note.GNU-stack,"",%progbits
-diff --git a/lib/accelerated/x86/elf/sha256-ssse3-x86.s b/lib/accelerated/x86/elf/sha256-ssse3-x86.s
-index 8d9aaa4a81..6d16b9140e 100644
---- a/lib/accelerated/x86/elf/sha256-ssse3-x86.s
-+++ b/lib/accelerated/x86/elf/sha256-ssse3-x86.s
-@@ -43,6 +43,7 @@
- .align	16
- sha256_block_data_order:
- .L_sha256_block_data_order_begin:
-+.byte	243,15,30,251
- 	pushl	%ebp
- 	pushl	%ebx
- 	pushl	%esi
-@@ -3384,4 +3385,21 @@ sha256_block_data_order:
- 	ret
- .size	sha256_block_data_order,.-.L_sha256_block_data_order_begin
- 
-+	.section ".note.gnu.property", "a"
-+	.p2align 2
-+	.long 1f - 0f
-+	.long 4f - 1f
-+	.long 5
-+0:
-+	.asciz "GNU"
-+1:
-+	.p2align 2
-+	.long 0xc0000002
-+	.long 3f - 2f
-+2:
-+	.long 3
-+3:
-+	.p2align 2
-+4:
-+
- .section .note.GNU-stack,"",%progbits
-diff --git a/lib/accelerated/x86/elf/sha256-ssse3-x86_64.s b/lib/accelerated/x86/elf/sha256-ssse3-x86_64.s
-index d196c6a793..1514ee45c0 100644
---- a/lib/accelerated/x86/elf/sha256-ssse3-x86_64.s
-+++ b/lib/accelerated/x86/elf/sha256-ssse3-x86_64.s
-@@ -5493,5 +5493,26 @@ sha256_block_data_order_avx2:
- 	.byte	0xf3,0xc3
- .cfi_endproc	
- .size	sha256_block_data_order_avx2,.-sha256_block_data_order_avx2
-+	.section ".note.gnu.property", "a"
-+	.p2align 3
-+	.long 1f - 0f
-+	.long 4f - 1f
-+	.long 5
-+0:
-+	# "GNU" encoded with .byte, since .asciz isn't supported
-+	# on Solaris.
-+	.byte 0x47
-+	.byte 0x4e
-+	.byte 0x55
-+	.byte 0
-+1:
-+	.p2align 3
-+	.long 0xc0000002
-+	.long 3f - 2f
-+2:
-+	.long 3
-+3:
-+	.p2align 3
-+4:
- 
- .section .note.GNU-stack,"",%progbits
-diff --git a/lib/accelerated/x86/elf/sha512-ssse3-x86.s b/lib/accelerated/x86/elf/sha512-ssse3-x86.s
-index 481c777154..afca4eae7b 100644
---- a/lib/accelerated/x86/elf/sha512-ssse3-x86.s
-+++ b/lib/accelerated/x86/elf/sha512-ssse3-x86.s
-@@ -43,6 +43,7 @@
- .align	16
- sha512_block_data_order:
- .L_sha512_block_data_order_begin:
-+.byte	243,15,30,251
- 	pushl	%ebp
- 	pushl	%ebx
- 	pushl	%esi
-@@ -602,4 +603,21 @@ sha512_block_data_order:
- .byte	112,112,114,111,64,111,112,101,110,115,115,108,46,111,114,103
- .byte	62,0
- 
-+	.section ".note.gnu.property", "a"
-+	.p2align 2
-+	.long 1f - 0f
-+	.long 4f - 1f
-+	.long 5
-+0:
-+	.asciz "GNU"
-+1:
-+	.p2align 2
-+	.long 0xc0000002
-+	.long 3f - 2f
-+2:
-+	.long 3
-+3:
-+	.p2align 2
-+4:
-+
- .section .note.GNU-stack,"",%progbits
-diff --git a/lib/accelerated/x86/elf/sha512-ssse3-x86_64.s b/lib/accelerated/x86/elf/sha512-ssse3-x86_64.s
-index 446c06a3e6..a7be2cd444 100644
---- a/lib/accelerated/x86/elf/sha512-ssse3-x86_64.s
-+++ b/lib/accelerated/x86/elf/sha512-ssse3-x86_64.s
-@@ -5498,5 +5498,26 @@ sha512_block_data_order_avx2:
- 	.byte	0xf3,0xc3
- .cfi_endproc	
- .size	sha512_block_data_order_avx2,.-sha512_block_data_order_avx2
-+	.section ".note.gnu.property", "a"
-+	.p2align 3
-+	.long 1f - 0f
-+	.long 4f - 1f
-+	.long 5
-+0:
-+	# "GNU" encoded with .byte, since .asciz isn't supported
-+	# on Solaris.
-+	.byte 0x47
-+	.byte 0x4e
-+	.byte 0x55
-+	.byte 0
-+1:
-+	.p2align 3
-+	.long 0xc0000002
-+	.long 3f - 2f
-+2:
-+	.long 3
-+3:
-+	.p2align 3
-+4:
- 
- .section .note.GNU-stack,"",%progbits
--- 
-2.31.1
-
 diff --git a/lib/accelerated/x86/elf/e_padlock-x86.s b/lib/accelerated/x86/elf/e_padlock-x86.s
-index ed8681ee4..dd56518f6 100644
+index ed8681e..dd56518 100644
 --- a/lib/accelerated/x86/elf/e_padlock-x86.s
 +++ b/lib/accelerated/x86/elf/e_padlock-x86.s
 @@ -1,4 +1,4 @@
@@ -1753,7 +1478,7 @@ index ed8681ee4..dd56518f6 100644
 -
 -
 diff --git a/lib/accelerated/x86/elf/e_padlock-x86_64.s b/lib/accelerated/x86/elf/e_padlock-x86_64.s
-index c161f0a73..f92da756c 100644
+index c161f0a..f92da75 100644
 --- a/lib/accelerated/x86/elf/e_padlock-x86_64.s
 +++ b/lib/accelerated/x86/elf/e_padlock-x86_64.s
 @@ -1,4 +1,4 @@
@@ -2563,3 +2288,280 @@ index c161f0a73..f92da756c 100644
  .section .note.GNU-stack,"",%progbits
 -
 -
+diff --git a/lib/accelerated/x86/elf/ghash-x86_64.s b/lib/accelerated/x86/elf/ghash-x86_64.s
+index 856ff17..20e3c6b 100644
+--- a/lib/accelerated/x86/elf/ghash-x86_64.s
++++ b/lib/accelerated/x86/elf/ghash-x86_64.s
+@@ -45,6 +45,7 @@
+ .align	16
+ gcm_gmult_4bit:
+ .cfi_startproc	
++.byte	243,15,30,250
+ 	pushq	%rbx
+ .cfi_adjust_cfa_offset	8
+ .cfi_offset	%rbx,-16
+@@ -156,6 +157,7 @@ gcm_gmult_4bit:
+ .align	16
+ gcm_ghash_4bit:
+ .cfi_startproc	
++.byte	243,15,30,250
+ 	pushq	%rbx
+ .cfi_adjust_cfa_offset	8
+ .cfi_offset	%rbx,-16
+@@ -903,6 +905,7 @@ gcm_init_clmul:
+ .align	16
+ gcm_gmult_clmul:
+ .cfi_startproc	
++.byte	243,15,30,250
+ .L_gmult_clmul:
+ 	movdqu	(%rdi),%xmm0
+ 	movdqa	.Lbswap_mask(%rip),%xmm5
+@@ -956,6 +959,7 @@ gcm_gmult_clmul:
+ .align	32
+ gcm_ghash_clmul:
+ .cfi_startproc	
++.byte	243,15,30,250
+ .L_ghash_clmul:
+ 	movdqa	.Lbswap_mask(%rip),%xmm10
+ 
+@@ -1450,6 +1454,7 @@ gcm_init_avx:
+ .align	32
+ gcm_gmult_avx:
+ .cfi_startproc	
++.byte	243,15,30,250
+ 	jmp	.L_gmult_clmul
+ .cfi_endproc	
+ .size	gcm_gmult_avx,.-gcm_gmult_avx
+@@ -1458,6 +1463,7 @@ gcm_gmult_avx:
+ .align	32
+ gcm_ghash_avx:
+ .cfi_startproc	
++.byte	243,15,30,250
+ 	vzeroupper
+ 
+ 	vmovdqu	(%rdi),%xmm10
+@@ -1884,5 +1890,26 @@ gcm_ghash_avx:
+ 
+ .byte	71,72,65,83,72,32,102,111,114,32,120,56,54,95,54,52,44,32,67,82,89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112,114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
+ .align	64
++	.section ".note.gnu.property", "a"
++	.p2align 3
++	.long 1f - 0f
++	.long 4f - 1f
++	.long 5
++0:
++	# "GNU" encoded with .byte, since .asciz isn't supported
++	# on Solaris.
++	.byte 0x47
++	.byte 0x4e
++	.byte 0x55
++	.byte 0
++1:
++	.p2align 3
++	.long 0xc0000002
++	.long 3f - 2f
++2:
++	.long 3
++3:
++	.p2align 3
++4:
+ 
+ .section .note.GNU-stack,"",%progbits
+diff --git a/lib/accelerated/x86/elf/sha1-ssse3-x86.s b/lib/accelerated/x86/elf/sha1-ssse3-x86.s
+index 8bfbcb6..57b6ba5 100644
+--- a/lib/accelerated/x86/elf/sha1-ssse3-x86.s
++++ b/lib/accelerated/x86/elf/sha1-ssse3-x86.s
+@@ -43,6 +43,7 @@
+ .align	16
+ sha1_block_data_order:
+ .L_sha1_block_data_order_begin:
++.byte	243,15,30,251
+ 	pushl	%ebp
+ 	pushl	%ebx
+ 	pushl	%esi
+@@ -1417,4 +1418,21 @@ sha1_block_data_order:
+ .byte	89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112
+ .byte	114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
+ 
++	.section ".note.gnu.property", "a"
++	.p2align 2
++	.long 1f - 0f
++	.long 4f - 1f
++	.long 5
++0:
++	.asciz "GNU"
++1:
++	.p2align 2
++	.long 0xc0000002
++	.long 3f - 2f
++2:
++	.long 3
++3:
++	.p2align 2
++4:
++
+ .section .note.GNU-stack,"",%progbits
+diff --git a/lib/accelerated/x86/elf/sha1-ssse3-x86_64.s b/lib/accelerated/x86/elf/sha1-ssse3-x86_64.s
+index d85d9ff..623aa69 100644
+--- a/lib/accelerated/x86/elf/sha1-ssse3-x86_64.s
++++ b/lib/accelerated/x86/elf/sha1-ssse3-x86_64.s
+@@ -5487,5 +5487,26 @@ K_XX_XX:
+ .byte	0xf,0xe,0xd,0xc,0xb,0xa,0x9,0x8,0x7,0x6,0x5,0x4,0x3,0x2,0x1,0x0
+ .byte	83,72,65,49,32,98,108,111,99,107,32,116,114,97,110,115,102,111,114,109,32,102,111,114,32,120,56,54,95,54,52,44,32,67,82,89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112,114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
+ .align	64
++	.section ".note.gnu.property", "a"
++	.p2align 3
++	.long 1f - 0f
++	.long 4f - 1f
++	.long 5
++0:
++	# "GNU" encoded with .byte, since .asciz isn't supported
++	# on Solaris.
++	.byte 0x47
++	.byte 0x4e
++	.byte 0x55
++	.byte 0
++1:
++	.p2align 3
++	.long 0xc0000002
++	.long 3f - 2f
++2:
++	.long 3
++3:
++	.p2align 3
++4:
+ 
+ .section .note.GNU-stack,"",%progbits
+diff --git a/lib/accelerated/x86/elf/sha256-ssse3-x86.s b/lib/accelerated/x86/elf/sha256-ssse3-x86.s
+index 8d9aaa4..6d16b91 100644
+--- a/lib/accelerated/x86/elf/sha256-ssse3-x86.s
++++ b/lib/accelerated/x86/elf/sha256-ssse3-x86.s
+@@ -43,6 +43,7 @@
+ .align	16
+ sha256_block_data_order:
+ .L_sha256_block_data_order_begin:
++.byte	243,15,30,251
+ 	pushl	%ebp
+ 	pushl	%ebx
+ 	pushl	%esi
+@@ -3384,4 +3385,21 @@ sha256_block_data_order:
+ 	ret
+ .size	sha256_block_data_order,.-.L_sha256_block_data_order_begin
+ 
++	.section ".note.gnu.property", "a"
++	.p2align 2
++	.long 1f - 0f
++	.long 4f - 1f
++	.long 5
++0:
++	.asciz "GNU"
++1:
++	.p2align 2
++	.long 0xc0000002
++	.long 3f - 2f
++2:
++	.long 3
++3:
++	.p2align 2
++4:
++
+ .section .note.GNU-stack,"",%progbits
+diff --git a/lib/accelerated/x86/elf/sha256-ssse3-x86_64.s b/lib/accelerated/x86/elf/sha256-ssse3-x86_64.s
+index 874062e..813aeb2 100644
+--- a/lib/accelerated/x86/elf/sha256-ssse3-x86_64.s
++++ b/lib/accelerated/x86/elf/sha256-ssse3-x86_64.s
+@@ -5493,5 +5493,26 @@ sha256_block_data_order_avx2:
+ 	.byte	0xf3,0xc3
+ .cfi_endproc	
+ .size	sha256_block_data_order_avx2,.-sha256_block_data_order_avx2
++	.section ".note.gnu.property", "a"
++	.p2align 3
++	.long 1f - 0f
++	.long 4f - 1f
++	.long 5
++0:
++	# "GNU" encoded with .byte, since .asciz isn't supported
++	# on Solaris.
++	.byte 0x47
++	.byte 0x4e
++	.byte 0x55
++	.byte 0
++1:
++	.p2align 3
++	.long 0xc0000002
++	.long 3f - 2f
++2:
++	.long 3
++3:
++	.p2align 3
++4:
+ 
+ .section .note.GNU-stack,"",%progbits
+diff --git a/lib/accelerated/x86/elf/sha512-ssse3-x86.s b/lib/accelerated/x86/elf/sha512-ssse3-x86.s
+index 481c777..afca4ea 100644
+--- a/lib/accelerated/x86/elf/sha512-ssse3-x86.s
++++ b/lib/accelerated/x86/elf/sha512-ssse3-x86.s
+@@ -43,6 +43,7 @@
+ .align	16
+ sha512_block_data_order:
+ .L_sha512_block_data_order_begin:
++.byte	243,15,30,251
+ 	pushl	%ebp
+ 	pushl	%ebx
+ 	pushl	%esi
+@@ -602,4 +603,21 @@ sha512_block_data_order:
+ .byte	112,112,114,111,64,111,112,101,110,115,115,108,46,111,114,103
+ .byte	62,0
+ 
++	.section ".note.gnu.property", "a"
++	.p2align 2
++	.long 1f - 0f
++	.long 4f - 1f
++	.long 5
++0:
++	.asciz "GNU"
++1:
++	.p2align 2
++	.long 0xc0000002
++	.long 3f - 2f
++2:
++	.long 3
++3:
++	.p2align 2
++4:
++
+ .section .note.GNU-stack,"",%progbits
+diff --git a/lib/accelerated/x86/elf/sha512-ssse3-x86_64.s b/lib/accelerated/x86/elf/sha512-ssse3-x86_64.s
+index 039b1d7..bad63fd 100644
+--- a/lib/accelerated/x86/elf/sha512-ssse3-x86_64.s
++++ b/lib/accelerated/x86/elf/sha512-ssse3-x86_64.s
+@@ -5498,5 +5498,26 @@ sha512_block_data_order_avx2:
+ 	.byte	0xf3,0xc3
+ .cfi_endproc	
+ .size	sha512_block_data_order_avx2,.-sha512_block_data_order_avx2
++	.section ".note.gnu.property", "a"
++	.p2align 3
++	.long 1f - 0f
++	.long 4f - 1f
++	.long 5
++0:
++	# "GNU" encoded with .byte, since .asciz isn't supported
++	# on Solaris.
++	.byte 0x47
++	.byte 0x4e
++	.byte 0x55
++	.byte 0
++1:
++	.p2align 3
++	.long 0xc0000002
++	.long 3f - 2f
++2:
++	.long 3
++3:
++	.p2align 3
++4:
+ 
+ .section .note.GNU-stack,"",%progbits
+-- 
+2.41.0
+
