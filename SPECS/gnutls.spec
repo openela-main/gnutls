@@ -13,7 +13,7 @@ print(string.sub(hash, 0, 16))
 }
 
 Version: 3.8.3
-Release: 1%{?dist}
+Release: 4%{?dist}
 # not upstreamed
 Patch: gnutls-3.2.7-rpath.patch
 Patch: gnutls-3.7.2-enable-intel-cet.patch
@@ -27,6 +27,8 @@ Patch: gnutls-3.7.8-ktls_skip_tls12_chachapoly_test.patch
 
 # upstreamed
 Patch: gnutls-3.8.3-ktls-utsname.patch
+Patch: gnutls-3.8.3-deterministic-ecdsa-fixes.patch
+Patch: gnutls-3.8.3-verify-chain.patch
 
 %bcond_without bootstrap
 %bcond_without dane
@@ -413,6 +415,16 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
+* Fri Apr  5 2024 Daiki Ueno <dueno@redhat.com> - 3.8.3-4
+- Bump release to ensure el9 package is greater than el9_* packages
+
+* Fri Mar 22 2024 Daiki Ueno <dueno@redhat.com> - 3.8.3-3
+- Bump release to ensure el9 package is greater than el9_* packages
+
+* Thu Mar 21 2024 Daiki Ueno <dueno@redhat.com> - 3.8.3-2
+- Fix timing side-channel in deterministic ECDSA (RHEL-28959)
+- Fix potential crash during chain building/verification (RHEL-28954)
+
 * Tue Jan 23 2024 Daiki Ueno <dueno@redhat.com> - 3.8.3-1
 - Update to gnutls 3.8.3 (RHEL-14891)
 
