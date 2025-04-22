@@ -15,6 +15,7 @@ Patch18:	gnutls-3.6.16-rehandshake-tickets.patch
 Patch19:	gnutls-3.6.16-rsa-psk-timing.patch
 Patch20:	gnutls-3.6.16-rsa-psk-timing-followup.patch
 Patch21:	gnutls-3.6.16-deterministic-ecdsa-fixes.patch
+Patch22:	gnutls-3.8.9-CVE-2024-12243.patch
 %bcond_without dane
 %if 0%{?rhel}
 %bcond_with guile
@@ -299,17 +300,17 @@ fi
 %endif
 
 %changelog
-* Tue Mar 26 2024 Daiki Ueno <dueno@redhat.com> - 3.6.16-8.3
-- Fix memleak with older GMP (RHEL-28957)
+* Wed Feb 12 2025 Alexander Sosedkin <asosedki@redhat.com> - 3.6.16-8.3
+- Backport the fix for CVE-2024-12243
 
 * Mon Mar 25 2024 Daiki Ueno <dueno@redhat.com> - 3.6.16-8.2
-- Fix timing side-channel in deterministic ECDSA (RHEL-28957)
+- Fix timing side-channel in deterministic ECDSA (RHEL-35231)
 
-* Thu Jan 18 2024 Daiki Ueno <dueno@redhat.com> - 3.6.16-8.1
-- auth/rsa-psk: minimize branching after decryption (RHEL-21586)
+* Mon Jan 22 2024 Daiki Ueno <dueno@redhat.com> - 3.6.16-8.1
+- auth/rsa-psk: minimize branching after decryption (RHEL-21550)
 
 * Wed Dec  6 2023 Daiki Ueno <dueno@redhat.com> - 3.6.16-8
-- auth/rsa_psk: side-step potential side-channel (RHEL-16753)
+- auth/rsa_psk: side-step potential side-channel (RHEL-16754)
 
 * Mon Jun 26 2023 Daiki Ueno <dueno@redhat.com> - 3.6.16-7
 - Clear server's session ticket indication at rehandshake (#2089817)
