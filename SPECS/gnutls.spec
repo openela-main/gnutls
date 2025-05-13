@@ -13,7 +13,7 @@ print(string.sub(hash, 0, 16))
 }
 
 Version: 3.8.3
-Release: 4%{?dist}
+Release: 6%{?dist}
 # not upstreamed
 Patch: gnutls-3.2.7-rpath.patch
 Patch: gnutls-3.7.2-enable-intel-cet.patch
@@ -29,6 +29,7 @@ Patch: gnutls-3.7.8-ktls_skip_tls12_chachapoly_test.patch
 Patch: gnutls-3.8.3-ktls-utsname.patch
 Patch: gnutls-3.8.3-deterministic-ecdsa-fixes.patch
 Patch: gnutls-3.8.3-verify-chain.patch
+Patch: gnutls-3.8.9-CVE-2024-12243.patch
 
 %bcond_without bootstrap
 %bcond_without dane
@@ -60,7 +61,7 @@ BuildRequires: zlib-devel, brotli-devel, libzstd-devel
 BuildRequires: automake, autoconf, gperf, libtool
 %endif
 BuildRequires: texinfo
-BuildRequires: nettle-devel >= 3.9.1
+BuildRequires: nettle-devel >= 3.10.1
 %if %{with tpm12}
 BuildRequires: trousers-devel >= 0.3.11.2
 %endif
@@ -78,7 +79,7 @@ BuildRequires: p11-kit-trust, ca-certificates
 Requires: crypto-policies
 Requires: p11-kit-trust
 Requires: libtasn1 >= 4.3
-Requires: nettle >= 3.9.1
+Requires: nettle >= 3.10.1
 %if %{with tpm12}
 Recommends: trousers >= 0.3.11.2
 %endif
@@ -415,6 +416,12 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
+* Mon Feb 17 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-6
+- Bump nettle dependency to 3.10.1 (RHEL-52740)
+
+* Wed Feb 12 2025 Alexander Sosedkin <asosedki@redhat.com> - 3.8.3-5
+- Backport the fix for CVE-2024-12243 (RHEL-78580)
+
 * Fri Apr  5 2024 Daiki Ueno <dueno@redhat.com> - 3.8.3-4
 - Bump release to ensure el9 package is greater than el9_* packages
 
