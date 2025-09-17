@@ -13,7 +13,7 @@ print(string.sub(hash, 0, 16))
 }
 
 Version: 3.8.3
-Release: 6%{?dist}
+Release: 6%{?dist}.2
 # not upstreamed
 Patch: gnutls-3.2.7-rpath.patch
 Patch: gnutls-3.7.2-enable-intel-cet.patch
@@ -30,6 +30,11 @@ Patch: gnutls-3.8.3-ktls-utsname.patch
 Patch: gnutls-3.8.3-deterministic-ecdsa-fixes.patch
 Patch: gnutls-3.8.3-verify-chain.patch
 Patch: gnutls-3.8.9-CVE-2024-12243.patch
+Patch: gnutls-3.8.3-cve-2025-32988.patch
+Patch: gnutls-3.8.3-cve-2025-32989.patch
+Patch: gnutls-3.8.3-cve-2025-32990.patch
+Patch: gnutls-3.8.3-cve-2025-6395.patch
+Patch: gnutls-3.8.3-keyupdate.patch
 
 %bcond_without bootstrap
 %bcond_without dane
@@ -416,6 +421,12 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
+* Fri Aug 15 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-6.2
+- key_update: rework the rekeying logic (RHEL-107498)
+
+* Fri Aug 15 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-6.1
+- Fix CVE-2025-32988, CVE-2025-32989, CVE-2025-32990, and CVE-2025-6395
+
 * Mon Feb 17 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-6
 - Bump nettle dependency to 3.10.1 (RHEL-52740)
 
