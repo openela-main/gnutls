@@ -1,5 +1,5 @@
 Version:	3.6.16
-Release: 8%{?dist}.3
+Release: 8%{?dist}.4
 Patch1:	gnutls-3.2.7-rpath.patch
 Patch2:	gnutls-3.6.4-no-now-guile.patch
 Patch3:	gnutls-3.6.13-enable-intel-cet.patch
@@ -16,6 +16,9 @@ Patch19:	gnutls-3.6.16-rsa-psk-timing.patch
 Patch20:	gnutls-3.6.16-rsa-psk-timing-followup.patch
 Patch21:	gnutls-3.6.16-deterministic-ecdsa-fixes.patch
 Patch22:	gnutls-3.8.9-CVE-2024-12243.patch
+Patch23:	gnutls-3.6.16-cve-2025-6395.patch
+Patch24:	gnutls-3.6.16-cve-2025-32988.patch
+Patch25:	gnutls-3.6.16-cve-2025-32990.patch
 %bcond_without dane
 %if 0%{?rhel}
 %bcond_with guile
@@ -300,6 +303,9 @@ fi
 %endif
 
 %changelog
+* Wed Feb 12 2025 Alexander Sosedkin <asosedki@redhat.com> - 3.6.16-8.4
+- Backport the fixes for CVE-2025-6395, CVE-2025-32988 and CVE-2025-32990
+
 * Wed Feb 12 2025 Alexander Sosedkin <asosedki@redhat.com> - 3.6.16-8.3
 - Backport the fix for CVE-2024-12243
 
