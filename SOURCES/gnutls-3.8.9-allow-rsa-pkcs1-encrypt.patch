@@ -1,0 +1,690 @@
+From 24de1f83a7ff5432cc9cca2ce7f88590e6c1536d Mon Sep 17 00:00:00 2001
+From: Daiki Ueno <ueno@gnu.org>
+Date: Wed, 18 Dec 2024 01:11:50 +0900
+Subject: [PATCH 1/6] pk: use deterministic RNG for RSA-PSS in self-tests
+
+This ports the logic to use a specialized RNG with deterministic
+behavior from RSA PKCS#1 v1.5 signature creation.
+
+Signed-off-by: Daiki Ueno <ueno@gnu.org>
+---
+ lib/nettle/pk.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/lib/nettle/pk.c b/lib/nettle/pk.c
+index 91eaffd689..f2d484bec5 100644
+--- a/lib/nettle/pk.c
++++ b/lib/nettle/pk.c
+@@ -1697,11 +1697,7 @@ static int _rsa_pss_sign_digest_tr(gnutls_digest_algorithm_t dig,
+ 		if (salt == NULL)
+ 			return gnutls_assert_val(GNUTLS_E_MEMORY_ERROR);
+ 
+-		ret = gnutls_rnd(GNUTLS_RND_NONCE, salt, salt_size);
+-		if (ret < 0) {
+-			gnutls_assert();
+-			goto cleanup;
+-		}
++		rnd_func(NULL, salt_size, salt);
+ 	}
+ 
+ 	ret = sign_func(pub, priv, rnd_ctx, rnd_func, salt_size, salt, digest,
+@@ -1712,7 +1708,6 @@ static int _rsa_pss_sign_digest_tr(gnutls_digest_algorithm_t dig,
+ 	} else
+ 		ret = 0;
+ 
+-cleanup:
+ 	gnutls_free(salt);
+ 	return ret;
+ }
+@@ -2500,6 +2495,7 @@ static int _wrap_nettle_pk_sign(gnutls_pk_algorithm_t algo,
+ 	case GNUTLS_PK_RSA_PSS: {
+ 		struct rsa_private_key priv;
+ 		struct rsa_public_key pub;
++		nettle_random_func *random_func;
+ 		mpz_t s;
+ 
+ 		_rsa_params_to_privkey(pk_params, &priv);
+@@ -2531,8 +2527,12 @@ static int _wrap_nettle_pk_sign(gnutls_pk_algorithm_t algo,
+ 			not_approved = true;
+ 		}
+ 
++		if (_gnutls_get_lib_state() == LIB_STATE_SELFTEST)
++			random_func = rnd_nonce_func_fallback;
++		else
++			random_func = rnd_nonce_func;
+ 		ret = _rsa_pss_sign_digest_tr(sign_params->rsa_pss_dig, &pub,
+-					      &priv, NULL, rnd_nonce_func,
++					      &priv, NULL, random_func,
+ 					      sign_params->salt_size,
+ 					      vdata->data, s);
+ 		if (ret < 0) {
+-- 
+2.48.1
+
+
+From 49d06efa414ff3a2957ab94ff8967ceec20d026b Mon Sep 17 00:00:00 2001
+From: Daiki Ueno <ueno@gnu.org>
+Date: Tue, 17 Dec 2024 16:55:47 +0900
+Subject: [PATCH 2/6] fips: perform RSA self-tests using RSA-PSS instead of
+ PKCS#1 v1.5
+
+Previously the RSA self-tests were using PKCS#1 v1.5, for both
+signature generation and encryption/decryption, which turned a bit
+problematic as GnuTLS now has a run-time option to disable that
+scheme.
+
+According to FIPS 140-3 IG 10.3.A, for each FIPS 186-4 and FIPS 186-5
+public key digital signature algorithm, a CAST shall be performed
+using at least one of the schemes approved for use in the approved
+mode. Similarly, the IG annex D.G mentions that if the RSA signature
+generation algorithm and RSA un-encapsulation scheme use the same
+implementation, only test for signature generation suffices.
+
+Therefore, this switches to using RSA-PSS only and drop the
+RSA encryption/decryption self-tests.
+
+Signed-off-by: Daiki Ueno <ueno@gnu.org>
+---
+ lib/crypto-selftests-pk.c | 54 ++++++++++++++++++++++++++++++++++++---
+ lib/fips.c                |  8 +++---
+ 2 files changed, 53 insertions(+), 9 deletions(-)
+
+diff --git a/lib/crypto-selftests-pk.c b/lib/crypto-selftests-pk.c
+index 9d6aca4b49..42f6004030 100644
+--- a/lib/crypto-selftests-pk.c
++++ b/lib/crypto-selftests-pk.c
+@@ -87,6 +87,24 @@ static const char rsa_2048_sig[] =
+ 	"\xef\x62\x18\x39\x7a\x50\x01\x46\x1b\xde\x8d\x37\xbc\x90\x6c\x07"
+ 	"\xc0\x07\xed\x60\xce\x2e\x31\xd6\x8f\xe8\x75\xdb\x45\x21\xc6\xcb";
+ 
++static const char rsa_pss_2048_sig[] =
++	"\x28\x77\x99\x8b\xc6\xe2\x59\x5c\xa5\x5c\x30\x78\x13\xe2\xca\xe1"
++	"\x13\xf5\x5d\xd5\x9a\xd7\x71\xff\x41\x82\xf4\x61\xda\x3a\xb6\x10"
++	"\x20\x87\x63\x5a\x7e\x4e\xc2\x5e\xb1\x85\x0f\x84\x58\xa3\x27\x2d"
++	"\xe5\x03\xcf\x65\x1a\xb2\xe6\x8b\xcc\x28\xd8\xcc\x1a\x64\x2a\x2d"
++	"\x9a\x0b\xb7\x32\xfe\x03\x57\x8c\xa0\x9b\xf5\xd0\x51\xb5\x6c\x65"
++	"\xfe\xf9\xf3\xa4\xba\x09\x43\x80\x31\xc1\x02\x88\x78\xaa\x65\x87"
++	"\x8d\xb8\x51\xba\x76\x57\xa6\x55\x18\x45\x95\x4e\x22\x82\xb6\xfd"
++	"\xc9\x04\xf9\xb0\x56\x24\x31\x84\x2b\x70\x91\x55\x7d\x05\x1a\xd0"
++	"\x30\xae\x5c\xfd\x11\x0a\x2e\x86\x09\x05\x44\x9a\xb5\xaf\x30\x8a"
++	"\xb6\xa8\x65\x54\xaf\xdf\xf8\x9a\xca\xa0\x96\x26\x45\x09\x41\x33"
++	"\xf3\x44\x71\xe1\x31\x31\x4c\x53\x60\xcb\x7f\x0b\x02\x08\x39\xf9"
++	"\xe4\xb2\x43\xa6\x07\x1b\x7e\x15\x32\x36\x3d\xc6\x78\x0b\xf1\x9a"
++	"\x33\xe3\xee\x8c\x48\xd4\x7e\xcb\xd1\xe6\x93\x29\x13\x04\x40\x8c"
++	"\x72\xc6\x39\xab\xa1\x76\x4e\x87\x3b\x91\x06\xdf\x1d\x1e\x07\x5e"
++	"\xc2\x26\x7c\xd6\x38\x5d\xba\x9b\x50\x38\x44\x63\x91\x2a\x98\xd2"
++	"\x30\x3f\xfb\x79\x15\x5f\x2e\xd2\x3f\xb7\xc4\x69\xc2\x2d\x79\x8d";
++
+ #ifdef ENABLE_DSA
+ /* DSA 2048 private key and signature */
+ static const char dsa_2048_privkey[] =
+@@ -532,6 +550,7 @@ static int test_known_sig(gnutls_pk_algorithm_t pk, unsigned bits,
+ 	gnutls_privkey_t key;
+ 	char param_name[32];
+ 	unsigned vflags = 0;
++	gnutls_x509_spki_t spki = NULL;
+ 
+ 	if (pk == GNUTLS_PK_EC || pk == GNUTLS_PK_GOST_01 ||
+ 	    pk == GNUTLS_PK_GOST_12_256 || pk == GNUTLS_PK_GOST_12_512 ||
+@@ -564,6 +583,22 @@ static int test_known_sig(gnutls_pk_algorithm_t pk, unsigned bits,
+ 		goto cleanup;
+ 	}
+ 
++	if (pk == GNUTLS_PK_RSA_PSS) {
++		ret = gnutls_x509_spki_init(&spki);
++		if (ret < 0) {
++			gnutls_assert();
++			goto cleanup;
++		}
++
++		gnutls_x509_spki_set_rsa_pss_params(spki, dig, 32);
++
++		ret = gnutls_privkey_set_spki(key, spki, 0);
++		if (ret < 0) {
++			gnutls_assert();
++			goto cleanup;
++		}
++	}
++
+ 	if (pk != (unsigned)gnutls_privkey_get_pk_algorithm(key, NULL)) {
+ 		ret = GNUTLS_E_SELF_TEST_ERROR;
+ 		goto cleanup;
+@@ -629,10 +664,12 @@ static int test_known_sig(gnutls_pk_algorithm_t pk, unsigned bits,
+ 	ret = 0;
+ 
+ cleanup:
+-	gnutls_free(sig.data);
+-	if (pub != 0)
++	if (spki != NULL)
++		gnutls_x509_spki_deinit(spki);
++	if (pub != NULL)
+ 		gnutls_pubkey_deinit(pub);
+ 	gnutls_privkey_deinit(key);
++	gnutls_free(sig.data);
+ 
+ 	if (ret == 0)
+ 		_gnutls_debug_log("%s-%s-known-sig self test succeeded\n",
+@@ -1026,8 +1063,17 @@ int gnutls_pk_self_test(unsigned flags, gnutls_pk_algorithm_t pk)
+ 
+ 		FALLTHROUGH;
+ 	case GNUTLS_PK_RSA_PSS:
+-		PK_TEST(GNUTLS_PK_RSA_PSS, test_sig, 2048,
+-			GNUTLS_SIGN_RSA_PSS_RSAE_SHA256);
++		/* In POST, we switch the RNG to deterministic one so
++		 * the KAT for RSA-PSS work. */
++		if (is_post) {
++			PK_KNOWN_TEST(GNUTLS_PK_RSA_PSS, 2048,
++				      GNUTLS_DIG_SHA256, rsa_2048_privkey,
++				      rsa_pss_2048_sig,
++				      GNUTLS_PRIVKEY_SIGN_FLAG_RSA_PSS);
++		} else {
++			PK_TEST(GNUTLS_PK_RSA_PSS, test_sig, 2048,
++				GNUTLS_SIGN_RSA_PSS_RSAE_SHA256);
++		}
+ 
+ 		if (!(flags & GNUTLS_SELF_TEST_FLAG_ALL))
+ 			return 0;
+diff --git a/lib/fips.c b/lib/fips.c
+index 63306705aa..84a70b5619 100644
+--- a/lib/fips.c
++++ b/lib/fips.c
+@@ -622,11 +622,9 @@ int _gnutls_fips_perform_self_checks2(void)
+ 	}
+ 
+ 	/* PK */
+-	if (_gnutls_config_is_rsa_pkcs1_encrypt_allowed()) {
+-		ret = gnutls_pk_self_test(0, GNUTLS_PK_RSA);
+-		if (ret < 0) {
+-			return gnutls_assert_val(GNUTLS_E_SELF_TEST_ERROR);
+-		}
++	ret = gnutls_pk_self_test(0, GNUTLS_PK_RSA_PSS);
++	if (ret < 0) {
++		return gnutls_assert_val(GNUTLS_E_SELF_TEST_ERROR);
+ 	}
+ 
+ 	ret = gnutls_pk_self_test(0, GNUTLS_PK_EC);
+-- 
+2.48.1
+
+
+From 2117b2d505116efb43b14f4ef8914142780170f6 Mon Sep 17 00:00:00 2001
+From: Daiki Ueno <ueno@gnu.org>
+Date: Wed, 12 Feb 2025 07:23:59 +0900
+Subject: [PATCH 3/6] pk: sprinkle SPKI over encryption functions
+
+Similarly to signing, the encrypt/decrypt/decrypt2 functions defined
+in gnutls_crypto_pk_st now take SPKI as an additional parameter, so
+the encryption/decryption behavior can be overridden.
+
+Signed-off-by: Daiki Ueno <ueno@gnu.org>
+---
+ lib/auth/rsa.c       |  2 +-
+ lib/auth/rsa_psk.c   |  2 +-
+ lib/crypto-backend.h |  9 ++++++---
+ lib/nettle/pk.c      | 40 ++++++++++++++++++++++++----------------
+ lib/pk.h             | 18 ++++++++++++------
+ lib/privkey.c        |  6 ++++--
+ lib/pubkey.c         |  2 +-
+ 7 files changed, 49 insertions(+), 30 deletions(-)
+
+diff --git a/lib/auth/rsa.c b/lib/auth/rsa.c
+index b5ecc092f8..4d181327ba 100644
+--- a/lib/auth/rsa.c
++++ b/lib/auth/rsa.c
+@@ -280,7 +280,7 @@ int _gnutls_gen_rsa_client_kx(gnutls_session_t session, gnutls_buffer_st *data)
+ 	}
+ 
+ 	ret = _gnutls_pk_encrypt(GNUTLS_PK_RSA, &sdata, &session->key.key,
+-				 &params);
++				 &params, &params.spki);
+ 
+ 	gnutls_pk_params_release(&params);
+ 
+diff --git a/lib/auth/rsa_psk.c b/lib/auth/rsa_psk.c
+index 399fb4da14..9f97569c5b 100644
+--- a/lib/auth/rsa_psk.c
++++ b/lib/auth/rsa_psk.c
+@@ -178,7 +178,7 @@ static int _gnutls_gen_rsa_psk_client_kx(gnutls_session_t session,
+ 
+ 	/* Encrypt premaster secret */
+ 	if ((ret = _gnutls_pk_encrypt(GNUTLS_PK_RSA, &sdata, &premaster_secret,
+-				      &params)) < 0) {
++				      &params, &params.spki)) < 0) {
+ 		gnutls_assert();
+ 		return ret;
+ 	}
+diff --git a/lib/crypto-backend.h b/lib/crypto-backend.h
+index f213a43dcf..1c7a25fd12 100644
+--- a/lib/crypto-backend.h
++++ b/lib/crypto-backend.h
+@@ -378,13 +378,16 @@ typedef struct gnutls_crypto_pk {
+ 	 * parameters, depending on the operation */
+ 	int (*encrypt)(gnutls_pk_algorithm_t, gnutls_datum_t *ciphertext,
+ 		       const gnutls_datum_t *plaintext,
+-		       const gnutls_pk_params_st *pub);
++		       const gnutls_pk_params_st *pub,
++		       const gnutls_x509_spki_st *encrypt);
+ 	int (*decrypt)(gnutls_pk_algorithm_t, gnutls_datum_t *plaintext,
+ 		       const gnutls_datum_t *ciphertext,
+-		       const gnutls_pk_params_st *priv);
++		       const gnutls_pk_params_st *priv,
++		       const gnutls_x509_spki_st *encrypt);
+ 	int (*decrypt2)(gnutls_pk_algorithm_t, const gnutls_datum_t *ciphertext,
+ 			unsigned char *plaintext, size_t paintext_size,
+-			const gnutls_pk_params_st *priv);
++			const gnutls_pk_params_st *priv,
++			const gnutls_x509_spki_st *encrypt);
+ 	int (*sign)(gnutls_pk_algorithm_t, gnutls_datum_t *signature,
+ 		    const gnutls_datum_t *data, const gnutls_pk_params_st *priv,
+ 		    const gnutls_x509_spki_st *sign);
+diff --git a/lib/nettle/pk.c b/lib/nettle/pk.c
+index f2d484bec5..9fa63c4a56 100644
+--- a/lib/nettle/pk.c
++++ b/lib/nettle/pk.c
+@@ -1221,7 +1221,8 @@ static inline int _rsa_oaep_encrypt(gnutls_digest_algorithm_t dig,
+ static int _wrap_nettle_pk_encrypt(gnutls_pk_algorithm_t algo,
+ 				   gnutls_datum_t *ciphertext,
+ 				   const gnutls_datum_t *plaintext,
+-				   const gnutls_pk_params_st *pk_params)
++				   const gnutls_pk_params_st *pk_params,
++				   const gnutls_x509_spki_st *encrypt_params)
+ {
+ 	int ret;
+ 	bool not_approved = false;
+@@ -1297,10 +1298,10 @@ static int _wrap_nettle_pk_encrypt(gnutls_pk_algorithm_t algo,
+ 			goto cleanup;
+ 		}
+ 
+-		ret = _rsa_oaep_encrypt(pk_params->spki.rsa_oaep_dig, &pub,
++		ret = _rsa_oaep_encrypt(encrypt_params->rsa_oaep_dig, &pub,
+ 					NULL, random_func,
+-					pk_params->spki.rsa_oaep_label.size,
+-					pk_params->spki.rsa_oaep_label.data,
++					encrypt_params->rsa_oaep_label.size,
++					encrypt_params->rsa_oaep_label.data,
+ 					plaintext->size, plaintext->data, buf);
+ 		if (ret == 0 || HAVE_LIB_ERROR()) {
+ 			ret = gnutls_assert_val(GNUTLS_E_ENCRYPTION_FAILED);
+@@ -1395,7 +1396,8 @@ static inline int _rsa_oaep_decrypt(gnutls_digest_algorithm_t dig,
+ static int _wrap_nettle_pk_decrypt(gnutls_pk_algorithm_t algo,
+ 				   gnutls_datum_t *plaintext,
+ 				   const gnutls_datum_t *ciphertext,
+-				   const gnutls_pk_params_st *pk_params)
++				   const gnutls_pk_params_st *pk_params,
++				   const gnutls_x509_spki_st *encrypt_params)
+ {
+ 	int ret;
+ 	bool not_approved = false;
+@@ -1403,7 +1405,7 @@ static int _wrap_nettle_pk_decrypt(gnutls_pk_algorithm_t algo,
+ 
+ 	FAIL_IF_LIB_ERROR;
+ 
+-	if (algo == GNUTLS_PK_RSA && pk_params->spki.pk == GNUTLS_PK_RSA_OAEP) {
++	if (algo == GNUTLS_PK_RSA && encrypt_params->pk == GNUTLS_PK_RSA_OAEP) {
+ 		algo = GNUTLS_PK_RSA_OAEP;
+ 	}
+ 
+@@ -1488,10 +1490,10 @@ static int _wrap_nettle_pk_decrypt(gnutls_pk_algorithm_t algo,
+ 			random_func = rnd_nonce_func_fallback;
+ 		else
+ 			random_func = rnd_nonce_func;
+-		ret = _rsa_oaep_decrypt(pk_params->spki.rsa_oaep_dig, &pub,
++		ret = _rsa_oaep_decrypt(encrypt_params->rsa_oaep_dig, &pub,
+ 					&priv, NULL, random_func,
+-					pk_params->spki.rsa_oaep_label.size,
+-					pk_params->spki.rsa_oaep_label.data,
++					encrypt_params->rsa_oaep_label.size,
++					encrypt_params->rsa_oaep_label.data,
+ 					&length, buf, ciphertext->data);
+ 
+ 		if (ret == 0 || HAVE_LIB_ERROR()) {
+@@ -1557,7 +1559,8 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
+ 				    const gnutls_datum_t *ciphertext,
+ 				    unsigned char *plaintext,
+ 				    size_t plaintext_size,
+-				    const gnutls_pk_params_st *pk_params)
++				    const gnutls_pk_params_st *pk_params,
++				    const gnutls_x509_spki_st *encrypt_params)
+ {
+ 	struct rsa_private_key priv;
+ 	struct rsa_public_key pub;
+@@ -1573,7 +1576,7 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
+ 		goto fail;
+ 	}
+ 
+-	if (pk_params->spki.pk == GNUTLS_PK_RSA_OAEP) {
++	if (encrypt_params->pk == GNUTLS_PK_RSA_OAEP) {
+ 		algo = GNUTLS_PK_RSA_OAEP;
+ 	}
+ 
+@@ -1610,10 +1613,10 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
+ 				       ciphertext->data);
+ 		break;
+ 	case GNUTLS_PK_RSA_OAEP:
+-		ret = _rsa_oaep_decrypt(pk_params->spki.rsa_oaep_dig, &pub,
++		ret = _rsa_oaep_decrypt(encrypt_params->rsa_oaep_dig, &pub,
+ 					&priv, NULL, random_func,
+-					pk_params->spki.rsa_oaep_label.size,
+-					pk_params->spki.rsa_oaep_label.data,
++					encrypt_params->rsa_oaep_label.size,
++					encrypt_params->rsa_oaep_label.data,
+ 					&plaintext_size, plaintext,
+ 					ciphertext->data);
+ 		break;
+@@ -3645,6 +3648,11 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+ 			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
+ 			goto cleanup;
+ 		}
++	} else if (algo == GNUTLS_PK_RSA_OAEP) {
++		if (spki.rsa_oaep_dig == GNUTLS_DIG_UNKNOWN)
++			spki.rsa_oaep_dig = GNUTLS_DIG_SHA256;
++		ddata.data = (void *)const_data;
++		ddata.size = sizeof(const_data);
+ 	} else {
+ 		ddata.data = (void *)const_data;
+ 		ddata.size = sizeof(const_data);
+@@ -3670,7 +3678,7 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+ 			}
+ 		}
+ 
+-		ret = _gnutls_pk_encrypt(algo, &sig, &ddata, params);
++		ret = _gnutls_pk_encrypt(algo, &sig, &ddata, params, &spki);
+ 		if (ret < 0) {
+ 			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
+ 		}
+@@ -3679,7 +3687,7 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+ 			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
+ 		}
+ 		if (ret == 0 &&
+-		    _gnutls_pk_decrypt(algo, &tmp, &sig, params) < 0) {
++		    _gnutls_pk_decrypt(algo, &tmp, &sig, params, &spki) < 0) {
+ 			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
+ 		}
+ 		if (ret == 0 &&
+diff --git a/lib/pk.h b/lib/pk.h
+index eca4e02d73..873ec4ef4e 100644
+--- a/lib/pk.h
++++ b/lib/pk.h
+@@ -26,12 +26,18 @@
+ extern int crypto_pk_prio;
+ extern gnutls_crypto_pk_st _gnutls_pk_ops;
+ 
+-#define _gnutls_pk_encrypt(algo, ciphertext, plaintext, params) \
+-	_gnutls_pk_ops.encrypt(algo, ciphertext, plaintext, params)
+-#define _gnutls_pk_decrypt(algo, ciphertext, plaintext, params) \
+-	_gnutls_pk_ops.decrypt(algo, ciphertext, plaintext, params)
+-#define _gnutls_pk_decrypt2(algo, ciphertext, plaintext, size, params) \
+-	_gnutls_pk_ops.decrypt2(algo, ciphertext, plaintext, size, params)
++#define _gnutls_pk_encrypt(algo, ciphertext, plaintext, params,     \
++			   encrypt_params)                          \
++	_gnutls_pk_ops.encrypt(algo, ciphertext, plaintext, params, \
++			       encrypt_params)
++#define _gnutls_pk_decrypt(algo, ciphertext, plaintext, params,     \
++			   encrypt_params)                          \
++	_gnutls_pk_ops.decrypt(algo, ciphertext, plaintext, params, \
++			       encrypt_params)
++#define _gnutls_pk_decrypt2(algo, ciphertext, plaintext, size, params,     \
++			    encrypt_params)                                \
++	_gnutls_pk_ops.decrypt2(algo, ciphertext, plaintext, size, params, \
++				encrypt_params)
+ #define _gnutls_pk_sign(algo, sig, data, params, sign_params) \
+ 	_gnutls_pk_ops.sign(algo, sig, data, params, sign_params)
+ #define _gnutls_pk_verify(algo, data, sig, params, sign_params) \
+diff --git a/lib/privkey.c b/lib/privkey.c
+index 84e984f6b9..05a3804c25 100644
+--- a/lib/privkey.c
++++ b/lib/privkey.c
+@@ -1590,7 +1590,8 @@ int gnutls_privkey_decrypt_data(gnutls_privkey_t key, unsigned int flags,
+ 	switch (key->type) {
+ 	case GNUTLS_PRIVKEY_X509:
+ 		return _gnutls_pk_decrypt(key->pk_algorithm, plaintext,
+-					  ciphertext, &key->key.x509->params);
++					  ciphertext, &key->key.x509->params,
++					  &key->key.x509->params.spki);
+ #ifdef ENABLE_PKCS11
+ 	case GNUTLS_PRIVKEY_PKCS11:
+ 		return _gnutls_pkcs11_privkey_decrypt_data(
+@@ -1657,7 +1658,8 @@ int gnutls_privkey_decrypt_data2(gnutls_privkey_t key, unsigned int flags,
+ 	case GNUTLS_PRIVKEY_X509:
+ 		return _gnutls_pk_decrypt2(key->pk_algorithm, ciphertext,
+ 					   plaintext, plaintext_size,
+-					   &key->key.x509->params);
++					   &key->key.x509->params,
++					   &key->key.x509->params.spki);
+ #ifdef ENABLE_PKCS11
+ 	case GNUTLS_PRIVKEY_PKCS11:
+ 		return _gnutls_pkcs11_privkey_decrypt_data2(key->key.pkcs11,
+diff --git a/lib/pubkey.c b/lib/pubkey.c
+index 1e5ecf31cd..97ac347348 100644
+--- a/lib/pubkey.c
++++ b/lib/pubkey.c
+@@ -2336,7 +2336,7 @@ int gnutls_pubkey_encrypt_data(gnutls_pubkey_t key, unsigned int flags,
+ 	}
+ 
+ 	return _gnutls_pk_encrypt(key->params.algo, ciphertext, plaintext,
+-				  &key->params);
++				  &key->params, &key->params.spki);
+ }
+ 
+ static int pubkey_supports_sig(gnutls_pubkey_t pubkey,
+-- 
+2.48.1
+
+
+From 12da96dbc7f3e1061a066cbb589844018c031737 Mon Sep 17 00:00:00 2001
+From: Daiki Ueno <ueno@gnu.org>
+Date: Wed, 12 Feb 2025 12:13:47 +0900
+Subject: [PATCH 4/6] pk: exercise decrypt2 in PCT
+
+Signed-off-by: Daiki Ueno <ueno@gnu.org>
+---
+ lib/nettle/pk.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/lib/nettle/pk.c b/lib/nettle/pk.c
+index 9fa63c4a56..65c3d8a990 100644
+--- a/lib/nettle/pk.c
++++ b/lib/nettle/pk.c
+@@ -1571,7 +1571,8 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
+ 
+ 	FAIL_IF_LIB_ERROR;
+ 
+-	if (algo != GNUTLS_PK_RSA || plaintext == NULL) {
++	if ((algo != GNUTLS_PK_RSA && algo != GNUTLS_PK_RSA_OAEP) ||
++	    plaintext == NULL) {
+ 		ret = gnutls_assert_val(GNUTLS_E_INTERNAL_ERROR);
+ 		goto fail;
+ 	}
+@@ -3695,6 +3696,16 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+ 		      memcmp(tmp.data, ddata.data, tmp.size) == 0)) {
+ 			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
+ 		}
++		if (ret == 0 &&
++		    _gnutls_pk_decrypt2(algo, &sig, tmp.data, tmp.size, params,
++					&spki) < 0) {
++			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
++		}
++		if (ret == 0 &&
++		    !(tmp.size == ddata.size &&
++		      memcmp(tmp.data, ddata.data, tmp.size) == 0)) {
++			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
++		}
+ 
+ 		if (algo == GNUTLS_PK_RSA) {
+ 			if (unlikely(gnutls_fips140_pop_context() < 0)) {
+-- 
+2.48.1
+
+
+From cce5688e3cb40eb535d2317cd263347f3bccbeb8 Mon Sep 17 00:00:00 2001
+From: Daiki Ueno <ueno@gnu.org>
+Date: Mon, 27 Jan 2025 16:36:41 +0900
+Subject: [PATCH 5/6] fips: perform both PCTs for unrestricted RSA key
+
+As PKCS#1 v1.5-padding is no longer allowed, exercise PCT with both
+RSA-PSS and RSA-OAEP for unrestricted RSA keys. Note that, it is no
+longer possible to create 512-bit RSA key under FIPS mode, because
+there is a restriction of message size in RSA-OAEP based on the key
+size, i.e., mLen > k - 2hLen - 2.
+
+Signed-off-by: Daiki Ueno <ueno@gnu.org>
+---
+ lib/nettle/pk.c            | 50 +++++++++++++-------------------------
+ tests/fips-override-test.c |  4 +--
+ tests/fips-rsa-sizes.c     |  6 -----
+ 3 files changed, 19 insertions(+), 41 deletions(-)
+
+diff --git a/lib/nettle/pk.c b/lib/nettle/pk.c
+index 65c3d8a990..5cad889f91 100644
+--- a/lib/nettle/pk.c
++++ b/lib/nettle/pk.c
+@@ -3603,7 +3603,6 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+ 	gnutls_datum_t ddata, tmp = { NULL, 0 };
+ 	char *gen_data = NULL;
+ 	gnutls_x509_spki_st spki;
+-	gnutls_fips140_context_t context;
+ 
+ 	ret = _gnutls_x509_spki_copy(&spki, &params->spki);
+ 	if (ret < 0) {
+@@ -3661,25 +3660,23 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+ 
+ 	switch (algo) {
+ 	case GNUTLS_PK_RSA:
+-	case GNUTLS_PK_RSA_OAEP:
+-		if (algo == GNUTLS_PK_RSA) {
+-			/* Push a temporary FIPS context because _gnutls_pk_encrypt and
+-			 * _gnutls_pk_decrypt below will mark RSAES-PKCS1-v1_5 operation
+-			 * non-approved */
+-			if (gnutls_fips140_context_init(&context) < 0) {
+-				ret = gnutls_assert_val(
+-					GNUTLS_E_PK_GENERATION_ERROR);
+-				goto cleanup;
+-			}
+-			if (gnutls_fips140_push_context(context) < 0) {
+-				ret = gnutls_assert_val(
+-					GNUTLS_E_PK_GENERATION_ERROR);
+-				gnutls_fips140_context_deinit(context);
+-				goto cleanup;
+-			}
++		/* To comply with FIPS 140-3 IG 10.3.A, additional comment 1,
++		 * Perform both key transport and signature PCTs for
++		 * unrestricted RSA key.  */
++		ret = pct_test(GNUTLS_PK_RSA_OAEP, params);
++		if (ret < 0) {
++			gnutls_assert();
++			break;
+ 		}
+-
+-		ret = _gnutls_pk_encrypt(algo, &sig, &ddata, params, &spki);
++		ret = pct_test(GNUTLS_PK_RSA_PSS, params);
++		if (ret < 0) {
++			gnutls_assert();
++			break;
++		}
++		break;
++	case GNUTLS_PK_RSA_OAEP:
++		ret = _gnutls_pk_encrypt(GNUTLS_PK_RSA_OAEP, &sig, &ddata,
++					 params, &spki);
+ 		if (ret < 0) {
+ 			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
+ 		}
+@@ -3707,14 +3704,6 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+ 			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
+ 		}
+ 
+-		if (algo == GNUTLS_PK_RSA) {
+-			if (unlikely(gnutls_fips140_pop_context() < 0)) {
+-				ret = gnutls_assert_val(
+-					GNUTLS_E_PK_GENERATION_ERROR);
+-			}
+-			gnutls_fips140_context_deinit(context);
+-		}
+-
+ 		if (ret < 0) {
+ 			goto cleanup;
+ 		}
+@@ -3722,12 +3711,7 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+ 		free(sig.data);
+ 		sig.data = NULL;
+ 
+-		/* RSA-OAEP can't be used for signing */
+-		if (algo == GNUTLS_PK_RSA_OAEP) {
+-			break;
+-		}
+-
+-		FALLTHROUGH;
++		break;
+ 	case GNUTLS_PK_EC: /* we only do keys for ECDSA */
+ 	case GNUTLS_PK_EDDSA_ED25519:
+ 	case GNUTLS_PK_EDDSA_ED448:
+diff --git a/tests/fips-override-test.c b/tests/fips-override-test.c
+index 82db3c0c79..6fbd444d47 100644
+--- a/tests/fips-override-test.c
++++ b/tests/fips-override-test.c
+@@ -67,9 +67,9 @@ static void try_crypto(void)
+ 	}
+ 
+ 	assert(gnutls_x509_privkey_init(&privkey) == 0);
+-	ret = gnutls_x509_privkey_generate(privkey, GNUTLS_PK_RSA, 512, 0);
++	ret = gnutls_x509_privkey_generate(privkey, GNUTLS_PK_RSA, 768, 0);
+ 	if (ret < 0) {
+-		fail("gnutls_x509_privkey_generate failed for 512-bit key\n");
++		fail("gnutls_x509_privkey_generate failed for 768-bit key\n");
+ 	}
+ 	gnutls_x509_privkey_deinit(privkey);
+ }
+diff --git a/tests/fips-rsa-sizes.c b/tests/fips-rsa-sizes.c
+index 61a76d3c09..2963ccd531 100644
+--- a/tests/fips-rsa-sizes.c
++++ b/tests/fips-rsa-sizes.c
+@@ -250,12 +250,6 @@ void doit(void)
+ 
+ 	assert(gnutls_fips140_context_init(&fips_context) == 0);
+ 
+-	generate_unsuccessfully(&privkey, &pubkey, 512);
+-	sign_verify_unsuccessfully(privkey, pubkey);
+-	generate_unsuccessfully(&privkey, &pubkey, 512);
+-	sign_verify_unsuccessfully(privkey, pubkey);
+-	generate_unsuccessfully(&privkey, &pubkey, 600);
+-	sign_verify_unsuccessfully(privkey, pubkey);
+ 	generate_unsuccessfully(&privkey, &pubkey, 768);
+ 	sign_verify_unsuccessfully(privkey, pubkey);
+ 	generate_unsuccessfully(&privkey, &pubkey, 1024);
+-- 
+2.48.1
+
+
+From 4e1642b13fdf194aa007cb37086ce9d42f867e47 Mon Sep 17 00:00:00 2001
+From: Daiki Ueno <ueno@gnu.org>
+Date: Mon, 10 Feb 2025 15:57:39 +0900
+Subject: [PATCH 6/6] tests: do not assume RSAES-PKCS1-v1_5 is enabled in
+ system config
+
+Signed-off-by: Alexander Sosedkin <asosedkin@redhat.com>
+Signed-off-by: Daiki Ueno <ueno@gnu.org>
+---
+ tests/system-override-allow-rsa-pkcs1-encrypt.sh | 10 ----------
+ 1 file changed, 10 deletions(-)
+
+diff --git a/tests/system-override-allow-rsa-pkcs1-encrypt.sh b/tests/system-override-allow-rsa-pkcs1-encrypt.sh
+index 714d0af946..30cb77ca50 100755
+--- a/tests/system-override-allow-rsa-pkcs1-encrypt.sh
++++ b/tests/system-override-allow-rsa-pkcs1-encrypt.sh
+@@ -56,14 +56,4 @@ if [ $? = 0 ]; then
+ fi
+ echo "RSAES-PKCS1-v1_5 successfully disabled"
+ 
+-unset GNUTLS_SYSTEM_PRIORITY_FILE
+-unset GNUTLS_SYSTEM_PRIORITY_FAIL_ON_INVALID
+-
+-${TEST}
+-if [ $? != 0 ]; then
+-	echo "${TEST} expected to succeed by default"
+-	exit 1
+-fi
+-echo "RSAES-PKCS1-v1_5 successfully enabled by default"
+-
+ exit 0
+-- 
+2.48.1
+

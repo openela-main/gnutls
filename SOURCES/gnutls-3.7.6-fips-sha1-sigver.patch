@@ -1,0 +1,107 @@
+From 115c0edc929a3f09b0a252507112c0de70026b5e Mon Sep 17 00:00:00 2001
+From: rpm-build <rpm-build>
+Date: Mon, 10 Feb 2025 11:43:51 +0900
+Subject: [PATCH] gnutls-3.7.6-fips-sha1-sigver.patch
+
+Signed-off-by: rpm-build <rpm-build>
+---
+ lib/nettle/pk.c   | 11 ++++-------
+ lib/pubkey.c      |  3 ---
+ tests/fips-test.c |  8 ++++----
+ 3 files changed, 8 insertions(+), 14 deletions(-)
+
+diff --git a/lib/nettle/pk.c b/lib/nettle/pk.c
+index 91eaffd..0b4788a 100644
+--- a/lib/nettle/pk.c
++++ b/lib/nettle/pk.c
+@@ -2784,10 +2784,7 @@ static int _wrap_nettle_pk_verify(gnutls_pk_algorithm_t algo,
+ 		if (hash_len > vdata->size)
+ 			hash_len = vdata->size;
+ 
+-		/* SHA-1 is allowed for SigVer in FIPS 140-3 in legacy
+-			 * mode */
+ 		switch (DIG_TO_MAC(sign_params->dsa_dig)) {
+-		case GNUTLS_MAC_SHA1:
+ 		case GNUTLS_MAC_SHA256:
+ 		case GNUTLS_MAC_SHA384:
+ 		case GNUTLS_MAC_SHA512:
+@@ -2857,7 +2854,7 @@ static int _wrap_nettle_pk_verify(gnutls_pk_algorithm_t algo,
+ 		bits = mpz_sizeinbase(pub.n, 2);
+ 
+ 		/* In FIPS 140-3, RSA key size should be larger than 2048-bit.
+-			 * In addition to this, only SHA-1 and SHA-2 are allowed
++			 * In addition to this, only SHA-2 is allowed
+ 			 * for SigVer; it is checked in _pkcs1_rsa_verify_sig in
+ 			 * lib/pubkey.c.
+ 			 */
+@@ -2903,9 +2900,9 @@ static int _wrap_nettle_pk_verify(gnutls_pk_algorithm_t algo,
+ 		}
+ 
+ 		/* RSA modulus size should be 2048-bit or larger in FIPS
+-			 * 140-3.  In addition to this, only SHA-1 and SHA-2 are
+-			 * allowed for SigVer, while Nettle only supports
+-			 * SHA256, SHA384, and SHA512 for RSA-PSS (see
++			 * 140-3.  In addition to this, only SHA-2 is allowed
++			 * for SigVer, while Nettle only supports SHA256,
++			 * SHA384, and SHA512 for RSA-PSS (see
+ 			 * _rsa_pss_verify_digest in this file for the details).
+ 			 */
+ 		if (unlikely(mpz_sizeinbase(pub.n, 2) < 2048)) {
+diff --git a/lib/pubkey.c b/lib/pubkey.c
+index 1e5ecf3..811e531 100644
+--- a/lib/pubkey.c
++++ b/lib/pubkey.c
+@@ -2516,10 +2516,7 @@ static int _pkcs1_rsa_verify_sig(gnutls_pk_algorithm_t pk,
+ 	d.size = digest_size;
+ 
+ 	if (pk == GNUTLS_PK_RSA) {
+-		/* SHA-1 is allowed for SigVer in FIPS 140-3 in legacy
+-		 * mode */
+ 		switch (me->id) {
+-		case GNUTLS_MAC_SHA1:
+ 		case GNUTLS_MAC_SHA256:
+ 		case GNUTLS_MAC_SHA384:
+ 		case GNUTLS_MAC_SHA512:
+diff --git a/tests/fips-test.c b/tests/fips-test.c
+index 3af4df7..c024427 100644
+--- a/tests/fips-test.c
++++ b/tests/fips-test.c
+@@ -596,7 +596,7 @@ void doit(void)
+ 	}
+ 	FIPS_POP_CONTEXT(NOT_APPROVED);
+ 
+-	/* Verify a signature created with 2432-bit RSA and SHA-1; approved */
++	/* Verify a signature created with 2432-bit RSA and SHA-1; not approved */
+ 	FIPS_PUSH_CONTEXT();
+ 	ret = gnutls_pubkey_verify_data2(pubkey, GNUTLS_SIGN_RSA_SHA1,
+ 					 GNUTLS_VERIFY_ALLOW_SIGN_WITH_SHA1,
+@@ -604,7 +604,7 @@ void doit(void)
+ 	if (ret < 0) {
+ 		fail("gnutls_pubkey_verify_data2 failed\n");
+ 	}
+-	FIPS_POP_CONTEXT(APPROVED);
++	FIPS_POP_CONTEXT(NOT_APPROVED);
+ 	gnutls_free(signature.data);
+ 	gnutls_pubkey_deinit(pubkey);
+ 	gnutls_privkey_deinit(privkey);
+@@ -707,7 +707,7 @@ void doit(void)
+ 	}
+ 	FIPS_POP_CONTEXT(NOT_APPROVED);
+ 
+-	/* Verify a signature created with ECDSA and SHA-1; approved */
++	/* Verify a signature created with ECDSA and SHA-1; not approved */
+ 	FIPS_PUSH_CONTEXT();
+ 	ret = gnutls_pubkey_verify_data2(pubkey, GNUTLS_SIGN_ECDSA_SHA1,
+ 					 GNUTLS_VERIFY_ALLOW_SIGN_WITH_SHA1,
+@@ -715,7 +715,7 @@ void doit(void)
+ 	if (ret < 0) {
+ 		fail("gnutls_pubkey_verify_data2 failed\n");
+ 	}
+-	FIPS_POP_CONTEXT(APPROVED);
++	FIPS_POP_CONTEXT(NOT_APPROVED);
+ 	gnutls_free(signature.data);
+ 
+ 	/* Create a signature with ECDSA and SHA-1 (old API); not approved */
+-- 
+2.48.1
+

@@ -1,0 +1,33 @@
+From c7f4ce40eaecafdefbf4db0ac2d3665bc0c41b33 Mon Sep 17 00:00:00 2001
+From: rpm-build <rpm-build>
+Date: Tue, 21 Nov 2023 14:13:38 +0900
+Subject: [PATCH] gnutls-3.7.2-no-explicit-init.patch
+
+Signed-off-by: rpm-build <rpm-build>
+---
+ lib/global.c | 9 ---------
+ 1 file changed, 9 deletions(-)
+
+diff --git a/lib/global.c b/lib/global.c
+index 924ec94..3baa202 100644
+--- a/lib/global.c
++++ b/lib/global.c
+@@ -510,15 +510,6 @@ static void _CONSTRUCTOR lib_init(void)
+ 			return;
+ 	}
+ 
+-	e = secure_getenv("GNUTLS_NO_EXPLICIT_INIT");
+-	if (e != NULL) {
+-		_gnutls_debug_log(
+-			"GNUTLS_NO_EXPLICIT_INIT is deprecated; use GNUTLS_NO_IMPLICIT_INIT\n");
+-		ret = atoi(e);
+-		if (ret == 1)
+-			return;
+-	}
+-
+ 	ret = _gnutls_global_init(1);
+ 	if (ret < 0) {
+ 		fprintf(stderr, "Error in GnuTLS initialization: %s\n",
+-- 
+2.41.0
+
