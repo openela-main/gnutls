@@ -13,7 +13,7 @@ print(string.sub(hash, 0, 16))
 }
 
 Version: 3.8.3
-Release: 6%{?dist}.2
+Release: 9%{?dist}
 # not upstreamed
 Patch: gnutls-3.2.7-rpath.patch
 Patch: gnutls-3.7.2-enable-intel-cet.patch
@@ -421,10 +421,13 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
-* Fri Aug 15 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-6.2
-- key_update: rework the rekeying logic (RHEL-107498)
+* Tue Aug  5 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-9
+- key_update: rework the rekeying logic (RHEL-107499)
 
-* Fri Aug 15 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-6.1
+* Fri Jul 18 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-8
+- Add missing changelog entry
+
+* Fri Jul 18 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-7
 - Fix CVE-2025-32988, CVE-2025-32989, CVE-2025-32990, and CVE-2025-6395
 
 * Mon Feb 17 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-6
