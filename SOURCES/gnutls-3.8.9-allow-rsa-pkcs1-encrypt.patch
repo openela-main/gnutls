@@ -1,4 +1,4 @@
-From 24de1f83a7ff5432cc9cca2ce7f88590e6c1536d Mon Sep 17 00:00:00 2001
+From 56402841df86125e2eb21fd548bae1bf482d939b Mon Sep 17 00:00:00 2001
 From: Daiki Ueno <ueno@gnu.org>
 Date: Wed, 18 Dec 2024 01:11:50 +0900
 Subject: [PATCH 1/6] pk: use deterministic RNG for RSA-PSS in self-tests
@@ -12,10 +12,10 @@ Signed-off-by: Daiki Ueno <ueno@gnu.org>
  1 file changed, 7 insertions(+), 7 deletions(-)
 
 diff --git a/lib/nettle/pk.c b/lib/nettle/pk.c
-index 91eaffd689..f2d484bec5 100644
+index 5986a410c2..7baf003f41 100644
 --- a/lib/nettle/pk.c
 +++ b/lib/nettle/pk.c
-@@ -1697,11 +1697,7 @@ static int _rsa_pss_sign_digest_tr(gnutls_digest_algorithm_t dig,
+@@ -1494,11 +1494,7 @@ static int _rsa_pss_sign_digest_tr(gnutls_digest_algorithm_t dig,
  		if (salt == NULL)
  			return gnutls_assert_val(GNUTLS_E_MEMORY_ERROR);
  
@@ -28,7 +28,7 @@ index 91eaffd689..f2d484bec5 100644
  	}
  
  	ret = sign_func(pub, priv, rnd_ctx, rnd_func, salt_size, salt, digest,
-@@ -1712,7 +1708,6 @@ static int _rsa_pss_sign_digest_tr(gnutls_digest_algorithm_t dig,
+@@ -1509,7 +1505,6 @@ static int _rsa_pss_sign_digest_tr(gnutls_digest_algorithm_t dig,
  	} else
  		ret = 0;
  
@@ -36,7 +36,7 @@ index 91eaffd689..f2d484bec5 100644
  	gnutls_free(salt);
  	return ret;
  }
-@@ -2500,6 +2495,7 @@ static int _wrap_nettle_pk_sign(gnutls_pk_algorithm_t algo,
+@@ -2126,6 +2121,7 @@ static int _wrap_nettle_pk_sign(gnutls_pk_algorithm_t algo,
  	case GNUTLS_PK_RSA_PSS: {
  		struct rsa_private_key priv;
  		struct rsa_public_key pub;
@@ -44,7 +44,7 @@ index 91eaffd689..f2d484bec5 100644
  		mpz_t s;
  
  		_rsa_params_to_privkey(pk_params, &priv);
-@@ -2531,8 +2527,12 @@ static int _wrap_nettle_pk_sign(gnutls_pk_algorithm_t algo,
+@@ -2157,8 +2153,12 @@ static int _wrap_nettle_pk_sign(gnutls_pk_algorithm_t algo,
  			not_approved = true;
  		}
  
@@ -59,10 +59,10 @@ index 91eaffd689..f2d484bec5 100644
  					      vdata->data, s);
  		if (ret < 0) {
 -- 
-2.48.1
+2.49.0
 
 
-From 49d06efa414ff3a2957ab94ff8967ceec20d026b Mon Sep 17 00:00:00 2001
+From 9f60b84e1496fa7bc62a136b83519e54ba935721 Mon Sep 17 00:00:00 2001
 From: Daiki Ueno <ueno@gnu.org>
 Date: Tue, 17 Dec 2024 16:55:47 +0900
 Subject: [PATCH 2/6] fips: perform RSA self-tests using RSA-PSS instead of
@@ -204,10 +204,10 @@ index 63306705aa..84a70b5619 100644
  
  	ret = gnutls_pk_self_test(0, GNUTLS_PK_EC);
 -- 
-2.48.1
+2.49.0
 
 
-From 2117b2d505116efb43b14f4ef8914142780170f6 Mon Sep 17 00:00:00 2001
+From f653b2c15f4dd550f7937cf86d255a3c96bdb236 Mon Sep 17 00:00:00 2001
 From: Daiki Ueno <ueno@gnu.org>
 Date: Wed, 12 Feb 2025 07:23:59 +0900
 Subject: [PATCH 3/6] pk: sprinkle SPKI over encryption functions
@@ -222,10 +222,11 @@ Signed-off-by: Daiki Ueno <ueno@gnu.org>
  lib/auth/rsa_psk.c   |  2 +-
  lib/crypto-backend.h |  9 ++++++---
  lib/nettle/pk.c      | 40 ++++++++++++++++++++++++----------------
- lib/pk.h             | 18 ++++++++++++------
+ lib/pk.h             | 17 +++++++++++------
+ lib/pkcs11/p11_pk.c  | 23 +++++++++++++----------
  lib/privkey.c        |  6 ++++--
  lib/pubkey.c         |  2 +-
- 7 files changed, 49 insertions(+), 30 deletions(-)
+ 8 files changed, 61 insertions(+), 40 deletions(-)
 
 diff --git a/lib/auth/rsa.c b/lib/auth/rsa.c
 index b5ecc092f8..4d181327ba 100644
@@ -254,10 +255,10 @@ index 399fb4da14..9f97569c5b 100644
  		return ret;
  	}
 diff --git a/lib/crypto-backend.h b/lib/crypto-backend.h
-index f213a43dcf..1c7a25fd12 100644
+index 74e29a7cb9..24cbb60f77 100644
 --- a/lib/crypto-backend.h
 +++ b/lib/crypto-backend.h
-@@ -378,13 +378,16 @@ typedef struct gnutls_crypto_pk {
+@@ -386,13 +386,16 @@ typedef struct gnutls_crypto_pk {
  	 * parameters, depending on the operation */
  	int (*encrypt)(gnutls_pk_algorithm_t, gnutls_datum_t *ciphertext,
  		       const gnutls_datum_t *plaintext,
@@ -278,10 +279,10 @@ index f213a43dcf..1c7a25fd12 100644
  		    const gnutls_datum_t *data, const gnutls_pk_params_st *priv,
  		    const gnutls_x509_spki_st *sign);
 diff --git a/lib/nettle/pk.c b/lib/nettle/pk.c
-index f2d484bec5..9fa63c4a56 100644
+index 7baf003f41..ffd7493748 100644
 --- a/lib/nettle/pk.c
 +++ b/lib/nettle/pk.c
-@@ -1221,7 +1221,8 @@ static inline int _rsa_oaep_encrypt(gnutls_digest_algorithm_t dig,
+@@ -1018,7 +1018,8 @@ static inline int _rsa_oaep_encrypt(gnutls_digest_algorithm_t dig,
  static int _wrap_nettle_pk_encrypt(gnutls_pk_algorithm_t algo,
  				   gnutls_datum_t *ciphertext,
  				   const gnutls_datum_t *plaintext,
@@ -291,7 +292,7 @@ index f2d484bec5..9fa63c4a56 100644
  {
  	int ret;
  	bool not_approved = false;
-@@ -1297,10 +1298,10 @@ static int _wrap_nettle_pk_encrypt(gnutls_pk_algorithm_t algo,
+@@ -1094,10 +1095,10 @@ static int _wrap_nettle_pk_encrypt(gnutls_pk_algorithm_t algo,
  			goto cleanup;
  		}
  
@@ -305,7 +306,7 @@ index f2d484bec5..9fa63c4a56 100644
  					plaintext->size, plaintext->data, buf);
  		if (ret == 0 || HAVE_LIB_ERROR()) {
  			ret = gnutls_assert_val(GNUTLS_E_ENCRYPTION_FAILED);
-@@ -1395,7 +1396,8 @@ static inline int _rsa_oaep_decrypt(gnutls_digest_algorithm_t dig,
+@@ -1192,7 +1193,8 @@ static inline int _rsa_oaep_decrypt(gnutls_digest_algorithm_t dig,
  static int _wrap_nettle_pk_decrypt(gnutls_pk_algorithm_t algo,
  				   gnutls_datum_t *plaintext,
  				   const gnutls_datum_t *ciphertext,
@@ -315,7 +316,7 @@ index f2d484bec5..9fa63c4a56 100644
  {
  	int ret;
  	bool not_approved = false;
-@@ -1403,7 +1405,7 @@ static int _wrap_nettle_pk_decrypt(gnutls_pk_algorithm_t algo,
+@@ -1200,7 +1202,7 @@ static int _wrap_nettle_pk_decrypt(gnutls_pk_algorithm_t algo,
  
  	FAIL_IF_LIB_ERROR;
  
@@ -324,7 +325,7 @@ index f2d484bec5..9fa63c4a56 100644
  		algo = GNUTLS_PK_RSA_OAEP;
  	}
  
-@@ -1488,10 +1490,10 @@ static int _wrap_nettle_pk_decrypt(gnutls_pk_algorithm_t algo,
+@@ -1285,10 +1287,10 @@ static int _wrap_nettle_pk_decrypt(gnutls_pk_algorithm_t algo,
  			random_func = rnd_nonce_func_fallback;
  		else
  			random_func = rnd_nonce_func;
@@ -338,7 +339,7 @@ index f2d484bec5..9fa63c4a56 100644
  					&length, buf, ciphertext->data);
  
  		if (ret == 0 || HAVE_LIB_ERROR()) {
-@@ -1557,7 +1559,8 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
+@@ -1354,7 +1356,8 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
  				    const gnutls_datum_t *ciphertext,
  				    unsigned char *plaintext,
  				    size_t plaintext_size,
@@ -348,7 +349,7 @@ index f2d484bec5..9fa63c4a56 100644
  {
  	struct rsa_private_key priv;
  	struct rsa_public_key pub;
-@@ -1573,7 +1576,7 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
+@@ -1370,7 +1373,7 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
  		goto fail;
  	}
  
@@ -357,7 +358,7 @@ index f2d484bec5..9fa63c4a56 100644
  		algo = GNUTLS_PK_RSA_OAEP;
  	}
  
-@@ -1610,10 +1613,10 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
+@@ -1407,10 +1410,10 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
  				       ciphertext->data);
  		break;
  	case GNUTLS_PK_RSA_OAEP:
@@ -371,7 +372,7 @@ index f2d484bec5..9fa63c4a56 100644
  					&plaintext_size, plaintext,
  					ciphertext->data);
  		break;
-@@ -3645,6 +3648,11 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+@@ -3255,6 +3258,11 @@ static int pct_test(gnutls_pk_algorithm_t algo,
  			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
  			goto cleanup;
  		}
@@ -383,7 +384,7 @@ index f2d484bec5..9fa63c4a56 100644
  	} else {
  		ddata.data = (void *)const_data;
  		ddata.size = sizeof(const_data);
-@@ -3670,7 +3678,7 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+@@ -3280,7 +3288,7 @@ static int pct_test(gnutls_pk_algorithm_t algo,
  			}
  		}
  
@@ -392,7 +393,7 @@ index f2d484bec5..9fa63c4a56 100644
  		if (ret < 0) {
  			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
  		}
-@@ -3679,7 +3687,7 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+@@ -3289,7 +3297,7 @@ static int pct_test(gnutls_pk_algorithm_t algo,
  			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
  		}
  		if (ret == 0 &&
@@ -402,34 +403,118 @@ index f2d484bec5..9fa63c4a56 100644
  		}
  		if (ret == 0 &&
 diff --git a/lib/pk.h b/lib/pk.h
-index eca4e02d73..873ec4ef4e 100644
+index 6969b534de..246d6e0299 100644
 --- a/lib/pk.h
 +++ b/lib/pk.h
-@@ -26,12 +26,18 @@
+@@ -27,13 +27,18 @@
+ 
  extern int crypto_pk_prio;
- extern gnutls_crypto_pk_st _gnutls_pk_ops;
  
 -#define _gnutls_pk_encrypt(algo, ciphertext, plaintext, params) \
--	_gnutls_pk_ops.encrypt(algo, ciphertext, plaintext, params)
+-	_gnutls_pk_backend()->encrypt(algo, ciphertext, plaintext, params)
 -#define _gnutls_pk_decrypt(algo, ciphertext, plaintext, params) \
--	_gnutls_pk_ops.decrypt(algo, ciphertext, plaintext, params)
--#define _gnutls_pk_decrypt2(algo, ciphertext, plaintext, size, params) \
--	_gnutls_pk_ops.decrypt2(algo, ciphertext, plaintext, size, params)
-+#define _gnutls_pk_encrypt(algo, ciphertext, plaintext, params,     \
-+			   encrypt_params)                          \
-+	_gnutls_pk_ops.encrypt(algo, ciphertext, plaintext, params, \
-+			       encrypt_params)
-+#define _gnutls_pk_decrypt(algo, ciphertext, plaintext, params,     \
-+			   encrypt_params)                          \
-+	_gnutls_pk_ops.decrypt(algo, ciphertext, plaintext, params, \
-+			       encrypt_params)
-+#define _gnutls_pk_decrypt2(algo, ciphertext, plaintext, size, params,     \
-+			    encrypt_params)                                \
-+	_gnutls_pk_ops.decrypt2(algo, ciphertext, plaintext, size, params, \
-+				encrypt_params)
+-	_gnutls_pk_backend()->decrypt(algo, ciphertext, plaintext, params)
+-#define _gnutls_pk_decrypt2(algo, ciphertext, plaintext, size, params)    \
++#define _gnutls_pk_encrypt(algo, ciphertext, plaintext, params,            \
++			   encrypt_params)                                 \
++	_gnutls_pk_backend()->encrypt(algo, ciphertext, plaintext, params, \
++				      encrypt_params)
++#define _gnutls_pk_decrypt(algo, ciphertext, plaintext, params,            \
++			   encrypt_params)                                 \
++	_gnutls_pk_backend()->decrypt(algo, ciphertext, plaintext, params, \
++				      encrypt_params)
++#define _gnutls_pk_decrypt2(algo, ciphertext, plaintext, size, params,    \
++			    encrypt_params)                               \
+ 	_gnutls_pk_backend()->decrypt2(algo, ciphertext, plaintext, size, \
+-				       params)
++				       params, encrypt_params)
  #define _gnutls_pk_sign(algo, sig, data, params, sign_params) \
- 	_gnutls_pk_ops.sign(algo, sig, data, params, sign_params)
+ 	_gnutls_pk_backend()->sign(algo, sig, data, params, sign_params)
  #define _gnutls_pk_verify(algo, data, sig, params, sign_params) \
+diff --git a/lib/pkcs11/p11_pk.c b/lib/pkcs11/p11_pk.c
+index 34a9cd24bc..8227998a2f 100644
+--- a/lib/pkcs11/p11_pk.c
++++ b/lib/pkcs11/p11_pk.c
+@@ -228,9 +228,9 @@ cleanup:
+ }
+ 
+ static bool init_rsa_oaep_param(CK_RSA_PKCS_OAEP_PARAMS *param,
+-				const gnutls_pk_params_st *pk_params)
++				const gnutls_x509_spki_st *encrypt_params)
+ {
+-	switch (pk_params->spki.rsa_oaep_dig) {
++	switch (encrypt_params->rsa_oaep_dig) {
+ 	case GNUTLS_DIG_SHA256:
+ 		param->hashAlg = CKM_SHA256;
+ 		param->mgf = CKG_MGF1_SHA256;
+@@ -247,8 +247,8 @@ static bool init_rsa_oaep_param(CK_RSA_PKCS_OAEP_PARAMS *param,
+ 		return false;
+ 	}
+ 	param->source = CKZ_DATA_SPECIFIED;
+-	param->pSourceData = pk_params->spki.rsa_oaep_label.data;
+-	param->ulSourceDataLen = pk_params->spki.rsa_oaep_label.size;
++	param->pSourceData = encrypt_params->rsa_oaep_label.data;
++	param->ulSourceDataLen = encrypt_params->rsa_oaep_label.size;
+ 	return true;
+ }
+ 
+@@ -706,7 +706,8 @@ static int derive_ecdh_secret(CK_SESSION_HANDLE session,
+ static int _wrap_p11_pk_encrypt(gnutls_pk_algorithm_t algo,
+ 				gnutls_datum_t *ciphertext,
+ 				const gnutls_datum_t *plaintext,
+-				const gnutls_pk_params_st *pk_params)
++				const gnutls_pk_params_st *pk_params,
++				const gnutls_x509_spki_st *encrypt_params)
+ {
+ 	int ret = 0;
+ 	CK_RV rv;
+@@ -742,7 +743,7 @@ static int _wrap_p11_pk_encrypt(gnutls_pk_algorithm_t algo,
+ 		mech.pParameter = &param_rsa_oaep;
+ 		mech.ulParameterLen = sizeof(param_rsa_oaep);
+ 
+-		if (!init_rsa_oaep_param(&param_rsa_oaep, pk_params)) {
++		if (!init_rsa_oaep_param(&param_rsa_oaep, encrypt_params)) {
+ 			ret = gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
+ 			goto cleanup;
+ 		}
+@@ -798,7 +799,8 @@ cleanup:
+ static int _wrap_p11_pk_decrypt(gnutls_pk_algorithm_t algo,
+ 				gnutls_datum_t *plaintext,
+ 				const gnutls_datum_t *ciphertext,
+-				const gnutls_pk_params_st *pk_params)
++				const gnutls_pk_params_st *pk_params,
++				const gnutls_x509_spki_st *encrypt_params)
+ {
+ 	int ret = 0;
+ 	CK_RV rv;
+@@ -834,7 +836,7 @@ static int _wrap_p11_pk_decrypt(gnutls_pk_algorithm_t algo,
+ 		mech.pParameter = &param_rsa_oaep;
+ 		mech.ulParameterLen = sizeof(param_rsa_oaep);
+ 
+-		if (!init_rsa_oaep_param(&param_rsa_oaep, pk_params)) {
++		if (!init_rsa_oaep_param(&param_rsa_oaep, encrypt_params)) {
+ 			ret = gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
+ 			goto cleanup;
+ 		}
+@@ -890,7 +892,8 @@ static int _wrap_p11_pk_decrypt2(gnutls_pk_algorithm_t algo,
+ 				 const gnutls_datum_t *ciphertext,
+ 				 unsigned char *plaintext,
+ 				 size_t plaintext_size,
+-				 const gnutls_pk_params_st *pk_params)
++				 const gnutls_pk_params_st *pk_params,
++				 const gnutls_x509_spki_st *encrypt_params)
+ {
+ 	int ret = 0;
+ 	uint32_t is_err;
+@@ -928,7 +931,7 @@ static int _wrap_p11_pk_decrypt2(gnutls_pk_algorithm_t algo,
+ 		mech.pParameter = &param_rsa_oaep;
+ 		mech.ulParameterLen = sizeof(param_rsa_oaep);
+ 
+-		if (!init_rsa_oaep_param(&param_rsa_oaep, pk_params)) {
++		if (!init_rsa_oaep_param(&param_rsa_oaep, encrypt_params)) {
+ 			ret = gnutls_assert_val(GNUTLS_E_INVALID_REQUEST);
+ 			goto cleanup;
+ 		}
 diff --git a/lib/privkey.c b/lib/privkey.c
 index 84e984f6b9..05a3804c25 100644
 --- a/lib/privkey.c
@@ -455,7 +540,7 @@ index 84e984f6b9..05a3804c25 100644
  	case GNUTLS_PRIVKEY_PKCS11:
  		return _gnutls_pkcs11_privkey_decrypt_data2(key->key.pkcs11,
 diff --git a/lib/pubkey.c b/lib/pubkey.c
-index 1e5ecf31cd..97ac347348 100644
+index 02a08b8163..73dd9e16b0 100644
 --- a/lib/pubkey.c
 +++ b/lib/pubkey.c
 @@ -2336,7 +2336,7 @@ int gnutls_pubkey_encrypt_data(gnutls_pubkey_t key, unsigned int flags,
@@ -468,10 +553,10 @@ index 1e5ecf31cd..97ac347348 100644
  
  static int pubkey_supports_sig(gnutls_pubkey_t pubkey,
 -- 
-2.48.1
+2.49.0
 
 
-From 12da96dbc7f3e1061a066cbb589844018c031737 Mon Sep 17 00:00:00 2001
+From e1be1e6b805b50a43ada57757ffe9cdf201289b5 Mon Sep 17 00:00:00 2001
 From: Daiki Ueno <ueno@gnu.org>
 Date: Wed, 12 Feb 2025 12:13:47 +0900
 Subject: [PATCH 4/6] pk: exercise decrypt2 in PCT
@@ -482,10 +567,10 @@ Signed-off-by: Daiki Ueno <ueno@gnu.org>
  1 file changed, 12 insertions(+), 1 deletion(-)
 
 diff --git a/lib/nettle/pk.c b/lib/nettle/pk.c
-index 9fa63c4a56..65c3d8a990 100644
+index ffd7493748..e4ad772842 100644
 --- a/lib/nettle/pk.c
 +++ b/lib/nettle/pk.c
-@@ -1571,7 +1571,8 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
+@@ -1368,7 +1368,8 @@ static int _wrap_nettle_pk_decrypt2(gnutls_pk_algorithm_t algo,
  
  	FAIL_IF_LIB_ERROR;
  
@@ -495,7 +580,7 @@ index 9fa63c4a56..65c3d8a990 100644
  		ret = gnutls_assert_val(GNUTLS_E_INTERNAL_ERROR);
  		goto fail;
  	}
-@@ -3695,6 +3696,16 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+@@ -3305,6 +3306,16 @@ static int pct_test(gnutls_pk_algorithm_t algo,
  		      memcmp(tmp.data, ddata.data, tmp.size) == 0)) {
  			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
  		}
@@ -513,10 +598,10 @@ index 9fa63c4a56..65c3d8a990 100644
  		if (algo == GNUTLS_PK_RSA) {
  			if (unlikely(gnutls_fips140_pop_context() < 0)) {
 -- 
-2.48.1
+2.49.0
 
 
-From cce5688e3cb40eb535d2317cd263347f3bccbeb8 Mon Sep 17 00:00:00 2001
+From 4e7b9e800f17bb0655e6d4de8f101d8a3b601fbc Mon Sep 17 00:00:00 2001
 From: Daiki Ueno <ueno@gnu.org>
 Date: Mon, 27 Jan 2025 16:36:41 +0900
 Subject: [PATCH 5/6] fips: perform both PCTs for unrestricted RSA key
@@ -535,10 +620,10 @@ Signed-off-by: Daiki Ueno <ueno@gnu.org>
  3 files changed, 19 insertions(+), 41 deletions(-)
 
 diff --git a/lib/nettle/pk.c b/lib/nettle/pk.c
-index 65c3d8a990..5cad889f91 100644
+index e4ad772842..f7f7c0637b 100644
 --- a/lib/nettle/pk.c
 +++ b/lib/nettle/pk.c
-@@ -3603,7 +3603,6 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+@@ -3213,7 +3213,6 @@ static int pct_test(gnutls_pk_algorithm_t algo,
  	gnutls_datum_t ddata, tmp = { NULL, 0 };
  	char *gen_data = NULL;
  	gnutls_x509_spki_st spki;
@@ -546,7 +631,7 @@ index 65c3d8a990..5cad889f91 100644
  
  	ret = _gnutls_x509_spki_copy(&spki, &params->spki);
  	if (ret < 0) {
-@@ -3661,25 +3660,23 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+@@ -3271,25 +3270,23 @@ static int pct_test(gnutls_pk_algorithm_t algo,
  
  	switch (algo) {
  	case GNUTLS_PK_RSA:
@@ -588,7 +673,7 @@ index 65c3d8a990..5cad889f91 100644
  		if (ret < 0) {
  			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
  		}
-@@ -3707,14 +3704,6 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+@@ -3317,14 +3314,6 @@ static int pct_test(gnutls_pk_algorithm_t algo,
  			ret = gnutls_assert_val(GNUTLS_E_PK_GENERATION_ERROR);
  		}
  
@@ -603,7 +688,7 @@ index 65c3d8a990..5cad889f91 100644
  		if (ret < 0) {
  			goto cleanup;
  		}
-@@ -3722,12 +3711,7 @@ static int pct_test(gnutls_pk_algorithm_t algo,
+@@ -3332,12 +3321,7 @@ static int pct_test(gnutls_pk_algorithm_t algo,
  		free(sig.data);
  		sig.data = NULL;
  
@@ -651,10 +736,10 @@ index 61a76d3c09..2963ccd531 100644
  	sign_verify_unsuccessfully(privkey, pubkey);
  	generate_unsuccessfully(&privkey, &pubkey, 1024);
 -- 
-2.48.1
+2.49.0
 
 
-From 4e1642b13fdf194aa007cb37086ce9d42f867e47 Mon Sep 17 00:00:00 2001
+From 7b5f1bddcd77d61531fdb5c084c43947786b27ab Mon Sep 17 00:00:00 2001
 From: Daiki Ueno <ueno@gnu.org>
 Date: Mon, 10 Feb 2025 15:57:39 +0900
 Subject: [PATCH 6/6] tests: do not assume RSAES-PKCS1-v1_5 is enabled in
@@ -686,5 +771,5 @@ index 714d0af946..30cb77ca50 100755
 -
  exit 0
 -- 
-2.48.1
+2.49.0
 

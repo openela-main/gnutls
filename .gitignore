@@ -1,6 +1,6 @@
-SOURCES/gmp-6.2.1.tar.xz
-SOURCES/gnutls-3.8.9.tar.xz
-SOURCES/gnutls-3.8.9.tar.xz.sig
-SOURCES/leancrypto-1.2.0.tar.gz
+SOURCES/leancrypto-1.5.0.tar.gz
 SOURCES/nettle-3.10.1.tar.gz
 SOURCES/nettle-3.10.1.tar.gz.sig
+SOURCES/gmp-6.2.1.tar.xz
+SOURCES/gnutls-3.8.10.tar.xz
+SOURCES/gnutls-3.8.10.tar.xz.sig
