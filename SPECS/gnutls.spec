@@ -13,7 +13,7 @@ print(string.sub(hash, 0, 16))
 }
 
 Version: 3.8.3
-Release: 9%{?dist}
+Release: 10%{?dist}
 # not upstreamed
 Patch: gnutls-3.2.7-rpath.patch
 Patch: gnutls-3.7.2-enable-intel-cet.patch
@@ -35,6 +35,12 @@ Patch: gnutls-3.8.3-cve-2025-32989.patch
 Patch: gnutls-3.8.3-cve-2025-32990.patch
 Patch: gnutls-3.8.3-cve-2025-6395.patch
 Patch: gnutls-3.8.3-keyupdate.patch
+# https://gitlab.com/gnutls/gnutls/-/merge_requests/2041
+Patch: gnutls-3.8.10-CVE-2025-9820.patch
+# https://gitlab.com/gnutls/gnutls/-/merge_requests/2062
+Patch: gnutls-3.8.10-CVE-2025-14831.patch
+
+# intentionally omitted: CVE-2026-1584, since 3.8.10 is not vulnerable
 
 %bcond_without bootstrap
 %bcond_without dane
@@ -421,6 +427,10 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
+* Fri Feb  6 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.3-10
+- Fix PKCS#11 token initialization label overflow (CVE-2025-9820)
+- Fix name constraint processing performance issue (CVE-2025-14831)
+
 * Tue Aug  5 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-9
 - key_update: rework the rekeying logic (RHEL-107499)
 
