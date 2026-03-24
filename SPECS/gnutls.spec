@@ -1,5 +1,5 @@
 Version:	3.6.16
-Release: 8%{?dist}.4
+Release: 8%{?dist}.5
 Patch1:	gnutls-3.2.7-rpath.patch
 Patch2:	gnutls-3.6.4-no-now-guile.patch
 Patch3:	gnutls-3.6.13-enable-intel-cet.patch
@@ -19,6 +19,8 @@ Patch22:	gnutls-3.8.9-CVE-2024-12243.patch
 Patch23:	gnutls-3.6.16-cve-2025-6395.patch
 Patch24:	gnutls-3.6.16-cve-2025-32988.patch
 Patch25:	gnutls-3.6.16-cve-2025-32990.patch
+Patch26:	gnutls-3.6.16-CVE-2025-9820.patch
+Patch27:	gnutls-3.6.16-CVE-2025-14831.patch
 %bcond_without dane
 %if 0%{?rhel}
 %bcond_with guile
@@ -303,6 +305,9 @@ fi
 %endif
 
 %changelog
+* Thu Feb 12 2026 Alexander Sosedkin <asosedki@redhat.com> - 3.6.16-8.5
+- Backport the fixes for CVE-2025-9820 and CVE-2025-14831
+
 * Wed Feb 12 2025 Alexander Sosedkin <asosedki@redhat.com> - 3.6.16-8.4
 - Backport the fixes for CVE-2025-6395, CVE-2025-32988 and CVE-2025-32990
 
