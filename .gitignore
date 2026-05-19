@@ -1,3 +1,4 @@
-SOURCES/gnutls-3.8.3.tar.xz
-SOURCES/gnutls-3.8.3.tar.xz.sig
 SOURCES/gmp-6.2.1.tar.xz
+SOURCES/gnutls-3.8.10.tar.xz
+SOURCES/gnutls-3.8.10.tar.xz.sig
+SOURCES/leancrypto-1.5.0.tar.gz

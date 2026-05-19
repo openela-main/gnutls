@@ -1,0 +1,51 @@
+commit b493de9ba31636de2f3b0c1dafab39b6412550bd
+Author: Alexander Sosedkin <asosedkin@redhat.com>
+Date:   Wed Nov 19 10:46:52 2025 +0100
+
+    Revert "pkcs12: enable PBMAC1 by default in FIPS mode"
+    
+    This reverts commit e52c7ca885798c40efb4ed6505e0690fc38c7dde.
+
+diff --git a/lib/x509/pkcs12.c b/lib/x509/pkcs12.c
+index a71f3ee561..18aae0bd49 100644
+--- a/lib/x509/pkcs12.c
++++ b/lib/x509/pkcs12.c
+@@ -997,12 +997,6 @@ int gnutls_pkcs12_generate_mac3(gnutls_pkcs12_t pkcs12,
+ 	if (me->oid == NULL)
+ 		return gnutls_assert_val(GNUTLS_E_UNIMPLEMENTED_FEATURE);
+ 
+-	/* Enable PBMAC1 by default in FIPS mode; otherwise the MAC
+-	 * calculation will be FIPS non-compliant.
+-	 */
+-	if (_gnutls_fips_mode_enabled())
+-		flags |= GNUTLS_PKCS12_USE_PBMAC1;
+-
+ 	/* Generate the salt.
+ 	 */
+ 	salt.data = salt_data;
+diff --git a/tests/cert-tests/pkcs12-pbmac1.sh b/tests/cert-tests/pkcs12-pbmac1.sh
+index 0c2a16b52c..ef72c0a1c4 100644
+--- a/tests/cert-tests/pkcs12-pbmac1.sh
++++ b/tests/cert-tests/pkcs12-pbmac1.sh
+@@ -109,21 +109,6 @@ if test ${rc} != 0; then
+ 	exit 1
+ fi
+ 
+-# check if PBMAC1 is used by default in FIPS mode
+-if test "$GNUTLS_FORCE_FIPS_MODE" = 1; then
+-	${VALGRIND} "$CERTTOOL" --to-p12 --password 1234 --p12-name "my-key" --load-certificate "$srcdir/../certs/cert-ecc256.pem" --load-privkey "$srcdir/../certs/ecc256.pem" --outder --outfile "$TMPFILE" >/dev/null
+-	rc=$?
+-	if test $rc != 0; then
+-		echo "PKCS12 FATAL encoding"
+-		exit 1
+-	fi
+-	${VALGRIND} "$CERTTOOL" -d 99 --p12-info --inder --password 1234 \
+-		    --infile "$TMPFILE" | grep "^	MAC: PBMAC1" || {
+-		echo "Generated PKCS12 file doesn't use PBMAC1 in FIPS mode"
+-		exit 1
+-	}
+-fi
+-
+ rm -rf "${testdir}"
+ 
+ exit 0

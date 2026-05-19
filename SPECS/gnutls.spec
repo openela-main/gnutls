@@ -12,32 +12,32 @@ sha256sum:close()
 print(string.sub(hash, 0, 16))
 }
 
-Version: 3.8.3
-Release: 10%{?dist}
+Version: 3.8.10
+Release: 3%{?dist}
 # not upstreamed
 Patch: gnutls-3.2.7-rpath.patch
 Patch: gnutls-3.7.2-enable-intel-cet.patch
 Patch: gnutls-3.7.2-no-explicit-init.patch
 Patch: gnutls-3.7.3-disable-config-reload.patch
-Patch: gnutls-3.7.3-fips-dsa-post.patch
 Patch: gnutls-3.7.6-drbg-reseed.patch
-Patch: gnutls-3.7.6-fips-sha1-sigver.patch
-Patch: gnutls-3.7.6-gmp-static.patch
-Patch: gnutls-3.7.8-ktls_skip_tls12_chachapoly_test.patch
 
 # upstreamed
-Patch: gnutls-3.8.3-ktls-utsname.patch
-Patch: gnutls-3.8.3-deterministic-ecdsa-fixes.patch
-Patch: gnutls-3.8.3-verify-chain.patch
-Patch: gnutls-3.8.9-CVE-2024-12243.patch
-Patch: gnutls-3.8.3-cve-2025-32988.patch
-Patch: gnutls-3.8.3-cve-2025-32989.patch
-Patch: gnutls-3.8.3-cve-2025-32990.patch
-Patch: gnutls-3.8.3-cve-2025-6395.patch
-Patch: gnutls-3.8.3-keyupdate.patch
-# https://gitlab.com/gnutls/gnutls/-/merge_requests/2041
+# * 5376a0cabf@3.8.11: key_update: fix state transition in KTLS code path
+# * 30c264b661@3.8.11: constate: switch epoch lookup to linear search
+# * 1d830baac2@3.8.11: key_update: rework the rekeying logic
+Patch: gnutls-3.8.10-keyupdate.patch
+# * 0992505881@3.8.11: tests: distribute ktls_utils.h
+Patch: gnutls-3.8.10-tests-ktls.patch
+
+# reverts
+# * e52c7ca885 pkcs12: enable PBMAC1 by default in FIPS mode
+Patch: gnutls-3.8.10-rhel9-revert-pbmac1-fips-default.patch
+# * da1df0a31 fips: Allow SigVer only with RSA keys with modulus >= 2048 bits
+Patch: gnutls-3.8.10-rhel9-revert-rsa-less-than-2048.patch
+
+# upstreamed: https://gitlab.com/gnutls/gnutls/-/merge_requests/2041
 Patch: gnutls-3.8.10-CVE-2025-9820.patch
-# https://gitlab.com/gnutls/gnutls/-/merge_requests/2062
+# upstreamed: https://gitlab.com/gnutls/gnutls/-/merge_requests/2062
 Patch: gnutls-3.8.10-CVE-2025-14831.patch
 
 # intentionally omitted: CVE-2026-1584, since 3.8.10 is not vulnerable
@@ -54,7 +54,8 @@ Patch: gnutls-3.8.10-CVE-2025-14831.patch
 %bcond_with tpm12
 %bcond_without tpm2
 %bcond_with gost
-%bcond_with certificate_compression
+%bcond_without certificate_compression
+%bcond_without leancrypto
 %bcond_without tests
 %bcond_without srp
 %bcond_without heartbeat
@@ -69,10 +70,14 @@ BuildRequires: readline-devel, libtasn1-devel >= 4.3
 BuildRequires: zlib-devel, brotli-devel, libzstd-devel
 %endif
 %if %{with bootstrap}
-BuildRequires: automake, autoconf, gperf, libtool
+BuildRequires: automake, autoconf271, gperf, libtool
+
 %endif
 BuildRequires: texinfo
 BuildRequires: nettle-devel >= 3.10.1
+%if %{with leancrypto}
+BuildRequires: meson
+%endif
 %if %{with tpm12}
 BuildRequires: trousers-devel >= 0.3.11.2
 %endif
@@ -81,7 +86,7 @@ BuildRequires: tpm2-tss-devel >= 3.0.3
 %endif
 BuildRequires: libidn2-devel
 BuildRequires: libunistring-devel
-BuildRequires: net-tools, datefudge, softhsm, gcc, gcc-c++
+BuildRequires: net-tools, softhsm, gcc, gcc-c++
 BuildRequires: gnupg2
 BuildRequires: git-core
 
@@ -101,7 +106,7 @@ BuildRequires: unbound-devel unbound-libs
 %if %{with guile}
 BuildRequires: guile22-devel
 %endif
-BuildRequires: make
+BuildRequires: make gtk-doc
 URL: http://www.gnutls.org/
 Source0: https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/%{name}-%{version}.tar.xz
 Source1: https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/%{name}-%{version}.tar.xz.sig
@@ -110,6 +115,10 @@ Source2: gnutls-release-keyring.pgp
 Source100:	gmp-6.2.1.tar.xz
 # Taken from the main gmp package
 Source101:	gmp-6.2.1-intel-cet.patch
+
+%if %{with leancrypto}
+Source200:	leancrypto-1.5.0.tar.gz
+%endif
 
 # Wildcard bundling exception https://fedorahosted.org/fpc/ticket/174
 Provides: bundled(gnulib) = 20130424
@@ -214,6 +223,13 @@ patch -p1 < %{SOURCE101}
 popd
 %endif
 
+%if %{with leancrypto}
+mkdir -p bundled_leancrypto
+pushd bundled_leancrypto
+tar --strip-components=1 -xf %{SOURCE200}
+popd
+%endif
+
 %build
 %ifarch aarch64 ppc64le
 %define _lto_cflags %{nil}
@@ -221,7 +237,7 @@ popd
 
 %if %{with fips}
 pushd bundled_gmp
-autoreconf -ifv
+/opt/rh/autoconf271/bin/autoreconf -ifv
 %configure --disable-cxx --disable-shared --enable-fat --with-pic
 %make_build
 popd
@@ -230,8 +246,41 @@ export GMP_CFLAGS="-I$PWD/bundled_gmp"
 export GMP_LIBS="$PWD/bundled_gmp/.libs/libgmp.a"
 %endif
 
+%if %{with leancrypto}
+pushd bundled_leancrypto
+%set_build_flags
+meson setup -Dprefix="$PWD/install" -Dlibdir="$PWD/install/lib" \
+        -Ddefault_library=static \
+        -Dascon=disabled -Dascon_keccak=disabled \
+        -Dbike_5=disabled -Dbike_3=disabled -Dbike_1=disabled \
+        -Dkyber_x25519=disabled -Ddilithium_ed25519=disabled \
+        -Dx509_parser=disabled -Dx509_generator=disabled \
+        -Dpkcs7_parser=disabled -Dpkcs7_generator=disabled \
+        -Dsha2-256=disabled \
+        -Dchacha20=disabled -Dchacha20_drng=disabled \
+        -Ddrbg_hash=disabled -Ddrbg_hmac=disabled \
+        -Dhash_crypt=disabled \
+        -Dhmac=disabled -Dhkdf=disabled \
+        -Dkdf_ctr=disabled -Dkdf_fb=disabled -Dkdf_dpi=disabled \
+        -Dpbkdf2=disabled \
+        -Dkmac_drng=disabled -Dcshake_drng=disabled \
+        -Dhotp=disabled -Dtotp=disabled \
+        -Daes_block=disabled -Daes_cbc=disabled -Daes_ctr=disabled \
+        -Daes_kw=disabled -Dapps=disabled \
+        _build
+meson compile -v -C _build
+meson install -C _build
+
+popd
+
+export LEANCRYPTO_DIR="$PWD/bundled_leancrypto/install"
+
+export LEANCRYPTO_CFLAGS="-I$LEANCRYPTO_DIR/include"
+export LEANCRYPTO_LIBS="$LEANCRYPTO_DIR/lib/libleancrypto.a"
+%endif
+
 %if %{with bootstrap}
-autoreconf -fi
+/opt/rh/autoconf271/bin/autoreconf -fi
 %endif
 
 sed -i -e 's|sys_lib_dlsearch_path_spec="/lib /usr/lib|sys_lib_dlsearch_path_spec="/lib /usr/lib %{_libdir}|g' configure
@@ -254,13 +303,14 @@ export FIPS_MODULE_NAME="$OS_NAME ${OS_VERSION_ID%%.*} %name"
 %endif
 
 %configure \
+	   --enable-dsa \
 %if %{with fips}
            --enable-fips140-mode \
            --with-fips140-module-name="$FIPS_MODULE_NAME" \
            --with-fips140-module-version=%{version}-%{srpmhash} \
 %endif
 %if %{with gost}
-    	   --enable-gost \
+	   --enable-gost \
 %else
 	   --disable-gost \
 %endif
@@ -305,12 +355,21 @@ export FIPS_MODULE_NAME="$OS_NAME ${OS_VERSION_ID%%.*} %name"
            --disable-libdane \
 %endif
 %if %{with certificate_compression}
-	   --with-zlib --with-brotli --with-zstd \
+	   --with-zlib=dlopen --with-brotli=dlopen --with-zstd=dlopen \
 %else
 	   --without-zlib --without-brotli --without-zstd \
 %endif
+%if %{with leancrypto}
+           --with-leancrypto \
+%else
+           --without-leancrypto \
+%endif
            --disable-rpath \
            --with-default-priority-string="@SYSTEM"
+
+%if %{with leancrypto}
+sed -i '/^Requires.private:/s/leancrypto[ ,]*//g' lib/gnutls.pc
+%endif
 
 # build libgnutlsxx.so with older SONAME
 make %{?_smp_mflags} V=1 CXX_LT_CURRENT=29 CXX_LT_REVISION=0 CXX_LT_AGE=1
@@ -382,7 +441,7 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %{_libdir}/.libgnutls.so.30*.hmac
 %endif
 %doc README.md AUTHORS NEWS THANKS
-%license LICENSE doc/COPYING doc/COPYING.LESSER
+%license COPYING COPYING.LESSERv2
 
 %files c++
 %{_libdir}/libgnutlsxx.so.*
@@ -427,9 +486,17 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
-* Fri Feb  6 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.3-10
+* Fri Feb  6 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.10-3
 - Fix PKCS#11 token initialization label overflow (CVE-2025-9820)
 - Fix name constraint processing performance issue (CVE-2025-14831)
+
+* Wed Jan 14 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.10-2
+- Reinstate and update the prematurely dropped rekeying patch
+
+* Thu Nov  6 2025 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.10-1
+- Rebase to 3.8.10
+- Revert defaulting to PBMAC1 in FIPS mode
+- Revert unapproving 1024-, 1280-, 1536- and 1792-bit RSA verification
 
 * Tue Aug  5 2025 Daiki Ueno <dueno@redhat.com> - 3.8.3-9
 - key_update: rework the rekeying logic (RHEL-107499)
