@@ -1,0 +1,61 @@
+From fdef6b6f493c303bdeb2513e1626ffef896a98f2 Mon Sep 17 00:00:00 2001
+From: Alexander Sosedkin <asosedkin@redhat.com>
+Date: Mon, 13 Apr 2026 13:42:52 +0200
+Subject: [PATCH] lib/pkcs11: do not silently pass on unimplemented
+ functionality
+
+When the relevant PKCS#11 header macros were not defined,
+several functions for FIPS PKCS#11 provider wrongfully reported success.
+They have been modified to return GNUTLS_E_UNIMPLEMENTED_FEATURE instead.
+
+Fixes: #1820
+Reported-by: Joshua Rogers of AISLE Research Team <joshua@joshua.hu>
+Co-authored-by: Joshua Rogers of AISLE Research Team <joshua@joshua.hu>
+Signed-off-by: Alexander Sosedkin <asosedkin@redhat.com>
+---
+ lib/pkcs11/p11_mac.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/lib/pkcs11/p11_mac.c b/lib/pkcs11/p11_mac.c
+index c2e3bcd61..02e897e68 100644
+--- a/lib/pkcs11/p11_mac.c
++++ b/lib/pkcs11/p11_mac.c
+@@ -806,8 +806,10 @@ static int wrap_p11_hkdf_extract(gnutls_mac_algorithm_t _mac, const void *key,
+ 	}
+ 
+ 	_p11_provider_close_session(session);
+-#endif
+ 	return 0;
++#else
++	return gnutls_assert_val(GNUTLS_E_UNIMPLEMENTED_FEATURE);
++#endif
+ }
+ 
+ static int wrap_p11_hkdf_expand(gnutls_mac_algorithm_t _mac, const void *key,
+@@ -871,8 +873,10 @@ static int wrap_p11_hkdf_expand(gnutls_mac_algorithm_t _mac, const void *key,
+ 	}
+ 
+ 	_p11_provider_close_session(session);
+-#endif
+ 	return 0;
++#else
++	return gnutls_assert_val(GNUTLS_E_UNIMPLEMENTED_FEATURE);
++#endif
+ }
+ 
+ static int wrap_p11_pbkdf2(gnutls_mac_algorithm_t _mac, const void *key,
+@@ -952,8 +956,10 @@ static int wrap_p11_pbkdf2(gnutls_mac_algorithm_t _mac, const void *key,
+ 	}
+ 
+ 	_p11_provider_close_session(session);
+-#endif
+ 	return 0;
++#else
++	return gnutls_assert_val(GNUTLS_E_UNIMPLEMENTED_FEATURE);
++#endif
+ }
+ 
+ gnutls_crypto_mac_st _gnutls_p11_mac_ops = {
+-- 
+2.53.0
+
