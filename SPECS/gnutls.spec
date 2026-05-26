@@ -1,5 +1,5 @@
 Version:	3.6.16
-Release: 8%{?dist}.5
+Release: 8%{?dist}.6
 Patch1:	gnutls-3.2.7-rpath.patch
 Patch2:	gnutls-3.6.4-no-now-guile.patch
 Patch3:	gnutls-3.6.13-enable-intel-cet.patch
@@ -21,6 +21,33 @@ Patch24:	gnutls-3.6.16-cve-2025-32988.patch
 Patch25:	gnutls-3.6.16-cve-2025-32990.patch
 Patch26:	gnutls-3.6.16-CVE-2025-9820.patch
 Patch27:	gnutls-3.6.16-CVE-2025-14831.patch
+# CVE fixes backported from 3.8.13 release
+# (https://gitlab.com/gnutls/gnutls/-/merge_requests/2102)
+Patch28: gnutls-3.6.16-CVE-2026-33846-dtls-len.patch
+Patch29: gnutls-3.6.16-CVE-2026-42009-dtls-qsort.patch
+Patch30: gnutls-3.6.16-CVE-2026-33845-dtls-uflow.patch
+Patch31: gnutls-3.6.16-CVE-2026-42010-psk-nul.patch
+Patch32: gnutls-3.6.16-CVE-2026-3833-nc-case.patch
+Patch33: gnutls-3.6.16-CVE-2026-42011-nc-intersect.patch
+Patch34: gnutls-3.6.16-CVE-2026-42012-url-san-cn.patch
+Patch35: gnutls-3.6.16-CVE-2026-42013-oversized-san.patch
+Patch36: gnutls-3.6.16-CVE-2026-42014-so-pin-uaf.patch
+Patch37: gnutls-3.6.16-CVE-2026-5260-p11-rsa-overread.patch
+Patch38: gnutls-3.6.16-CVE-2026-42015-p12-bag32.patch
+# not in 3.6: CVE-2026-3832-ocsp-rev-0 - since 3.8.9
+# not in 3.6: CVE-2026-5419-p7-constant-time - since 3.7.7
+# non-CVE security fixes from the same release
+Patch39: gnutls-3.6.16-1808-psk-rehandshake.patch
+Patch40: gnutls-3.6.16-1810-ocsp-truncated-eku.patch
+# not in 3.6: 1813-p11p-aes-ephemeral
+Patch41: gnutls-3.6.16-1818-rsa-coprime.patch
+Patch42: gnutls-3.6.16-1818-pem-parsing.patch
+Patch43: gnutls-3.6.16-1819-dblfree-mid-import.patch
+# not in 3.6: 1822-sct-overread
+# not in 3.6: 1823-cfg-clear-options
+Patch44: gnutls-3.6.16-1817-security-parameters.patch
+# not in 3.6: 1820-p11p-kdf
+
 %bcond_without dane
 %if 0%{?rhel}
 %bcond_with guile
@@ -235,7 +262,7 @@ rm -f $RPM_BUILD_ROOT%{_libdir}/pkgconfig/gnutls-dane.pc
 %find_lang gnutls
 
 %check
-make check %{?_smp_mflags}
+make check %{?_smp_mflags} V=1 VERBOSE=1
 
 %post devel
 if [ -f %{_infodir}/gnutls.info.gz ]; then
@@ -305,6 +332,24 @@ fi
 %endif
 
 %changelog
+* Thu Apr 30 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.6.16-8.6
+- Fix CVE-2026-33846 (DTLS fragment reassembly, High, heap overwrite)
+- Fix CVE-2026-42009 (DTLS fragment reassembly, High, undefined behaviour)
+- Fix CVE-2026-33845 (DTLS fragment reassembly, High, heap overread)
+- Fix CVE-2026-42010 (PSK authentication, High, authentication bypass)
+- Fix CVE-2026-3833 (Name constraints, Medium, name constraint bypass)
+- Fix CVE-2026-42011 (Name constraints, Medium, name constraint bypass)
+- Fix CVE-2026-42012 (CN fallback, Medium, certificate misuse)
+- Fix CVE-2026-42013 (CN fallback, Medium, certificate misuse)
+- Fix CVE-2026-42014 (PKCS#11 PIN change, Medium, use-after-free)
+- Fix CVE-2026-5260 (PKCS#11 RSA, Medium, heap overread)
+- Fix CVE-2026-42015 (PKCS#12 appending, Low, heap overwrite)
+- Fix upstream security issue #1808 (PSK rehandshake)
+- Fix upstream security issue #1810 (EKU OID prefix match)
+- Fix upstream security issue #1818 (RSA correctness, OpenSSL format import)
+- Fix upstream security issue #1819 (PKCS#11 trust removal error path)
+- Fix upstream security issue #1817 (session parameter loading robustness)
+
 * Thu Feb 12 2026 Alexander Sosedkin <asosedki@redhat.com> - 3.6.16-8.5
 - Backport the fixes for CVE-2025-9820 and CVE-2025-14831
 
