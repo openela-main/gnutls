@@ -13,7 +13,7 @@ print(string.sub(hash, 0, 16))
 }
 
 Version: 3.8.10
-Release: 3%{?dist}
+Release: 4%{?dist}
 # not upstreamed
 Patch: gnutls-3.2.7-rpath.patch
 Patch: gnutls-3.7.2-enable-intel-cet.patch
@@ -35,12 +35,40 @@ Patch: gnutls-3.8.10-rhel9-revert-pbmac1-fips-default.patch
 # * da1df0a31 fips: Allow SigVer only with RSA keys with modulus >= 2048 bits
 Patch: gnutls-3.8.10-rhel9-revert-rsa-less-than-2048.patch
 
+# CVE fixes backported from 3.8.12 release
 # upstreamed: https://gitlab.com/gnutls/gnutls/-/merge_requests/2041
 Patch: gnutls-3.8.10-CVE-2025-9820.patch
 # upstreamed: https://gitlab.com/gnutls/gnutls/-/merge_requests/2062
 Patch: gnutls-3.8.10-CVE-2025-14831.patch
-
 # intentionally omitted: CVE-2026-1584, since 3.8.10 is not vulnerable
+
+# CVE fixes backported from 3.8.13 release
+# (https://gitlab.com/gnutls/gnutls/-/merge_requests/2102)
+Patch: gnutls-3.8.10-CVE-2026-33846-dtls-len.patch
+Patch: gnutls-3.8.10-CVE-2026-42009-dtls-qsort.patch
+Patch: gnutls-3.8.10-CVE-2026-33845-dtls-uflow.patch
+Patch: gnutls-3.8.10-CVE-2026-42010-psk-nul.patch
+Patch: gnutls-3.8.10-CVE-2026-3833-nc-case.patch
+Patch: gnutls-3.8.10-CVE-2026-42011-nc-intersect.patch
+Patch: gnutls-3.8.10-CVE-2026-42012-url-san-cn.patch
+Patch: gnutls-3.8.10-CVE-2026-42013-oversized-san.patch
+Patch: gnutls-3.8.10-CVE-2026-42014-so-pin-uaf.patch
+Patch: gnutls-3.8.10-CVE-2026-5260-p11-rsa-overread.patch
+Patch: gnutls-3.8.10-CVE-2026-42015-p12-bag32.patch
+Patch: gnutls-3.8.10-CVE-2026-3832-ocsp-rev-0.patch
+Patch: gnutls-3.8.10-CVE-2026-5419-p7-constant-time.patch
+# non-CVE security fixes from the same release
+Patch: gnutls-3.8.10-1808-psk-rehandshake.patch
+Patch: gnutls-3.8.10-1810-ocsp-truncated-eku.patch
+Patch: gnutls-3.8.10-1813-p11p-aes-ephemeral.patch
+Patch: gnutls-3.8.10-1818-rsa-coprime.patch
+Patch: gnutls-3.8.10-1818-pem-parsing.patch
+Patch: gnutls-3.8.10-1819-dblfree-mid-import.patch
+Patch: gnutls-3.8.10-1822-sct-overread.patch
+Patch: gnutls-3.8.10-1841-hybrid-kx-zeroize.patch
+Patch: gnutls-3.8.10-1823-cfg-clear-options.patch
+Patch: gnutls-3.8.10-1817-security-parameters.patch
+Patch: gnutls-3.8.10-1820-p11p-kdf.patch
 
 %bcond_without bootstrap
 %bcond_without dane
@@ -486,6 +514,32 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
+* Thu Apr 30 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.10-4
+- Fix CVE-2026-33846 (DTLS fragment reassembly, High, heap overwrite)
+- Fix CVE-2026-42009 (DTLS fragment reassembly, High, undefined behaviour)
+- Fix CVE-2026-33845 (DTLS fragment reassembly, High, heap overread)
+- Fix CVE-2026-42010 (PSK authentication, High, authentication bypass)
+- Fix CVE-2026-3833 (Name constraints, Medium, name constraint bypass)
+- Fix CVE-2026-42011 (Name constraints, Medium, name constraint bypass)
+- Fix CVE-2026-42012 (CN fallback, Medium, certificate misuse)
+- Fix CVE-2026-42013 (CN fallback, Medium, certificate misuse)
+- Fix CVE-2026-42014 (PKCS#11 PIN change, Medium, use-after-free)
+- Fix CVE-2026-5260 (PKCS#11 RSA, Medium, heap overread)
+- Fix CVE-2026-42015 (PKCS#12 appending, Low, heap overwrite)
+- Fix CVE-2026-3832 (OCSP, Low, revocation bypass)
+- Fix CVE-2026-5419 (PKCS#7, Low, timing side-channel)
+- Fix upstream security issue #1808 (PSK rehandshake)
+- Fix upstream security issue #1810 (EKU OID prefix match)
+- Fix upstream security issue #1813 (pkcs11-provider persistent keys)
+- Fix upstream security issue #1818 (RSA correctness, OpenSSL format import)
+- Fix upstream security issue #1819 (PKCS#11 trust removal error path)
+- Fix upstream security issue #1822 (SCT extension parser OOB read)
+- Fix upstream security issue #1841 (key zeroization in hybrid kex)
+- Fix upstream security issue #1823 (malformed certtool template)
+- Fix upstream security issue #1817 (session parameter loading robustness)
+- Fix upstream security issue #1820 (PKCS#11 KDF succeeding w/o deriving)
+- gnutls-3.8.10-CVE-2025-9820.patch: update Makefile.in
+
 * Fri Feb  6 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.10-3
 - Fix PKCS#11 token initialization label overflow (CVE-2025-9820)
 - Fix name constraint processing performance issue (CVE-2025-14831)

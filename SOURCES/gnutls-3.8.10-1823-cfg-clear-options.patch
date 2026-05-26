@@ -1,0 +1,62 @@
+From 055b2c742d6faf44c2fdaaa7e37c744a01856abc Mon Sep 17 00:00:00 2001
+From: Alexander Sosedkin <asosedkin@redhat.com>
+Date: Tue, 14 Apr 2026 18:21:19 +0200
+Subject: [PATCH 1/2] src/cfg: fix iterating in clear_options, on the error
+ path
+
+Calling testing tools bundled with GnuTLS with malformed arguments
+could lead to crashing them.
+This change makes the error path of option parsing more robust.
+
+Fixes: #1823
+Reported-by: Joshua Rogers of AISLE Research Team <joshua@joshua.hu>
+Co-authored-by: Joshua Rogers of AISLE Research Team <joshua@joshua.hu>
+Signed-off-by: Alexander Sosedkin <asosedkin@redhat.com>
+---
+ src/cfg.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/cfg.c b/src/cfg.c
+index 9a9627f18..47d2d6434 100644
+--- a/src/cfg.c
++++ b/src/cfg.c
+@@ -370,7 +370,7 @@ static int take_option(struct options_st *options, struct cfg_option_st *option)
+ 
+ static void clear_options(struct options_st *options)
+ {
+-	for (size_t i = 0; options->length; i++) {
++	for (size_t i = 0; i < options->length; i++) {
+ 		clear_option(&options->data[i]);
+ 	}
+ }
+-- 
+2.53.0
+
+
+From 9649e899b677fdd945bf8f4f67b3f9f25cea314a Mon Sep 17 00:00:00 2001
+From: Alexander Sosedkin <asosedkin@redhat.com>
+Date: Tue, 14 Apr 2026 18:25:13 +0200
+Subject: [PATCH 2/2] src/cfg: avoid a data leak in clear_options, on the error
+ path
+
+Signed-off-by: Alexander Sosedkin <asosedkin@redhat.com>
+---
+ src/cfg.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/cfg.c b/src/cfg.c
+index 47d2d6434..c1f351dfb 100644
+--- a/src/cfg.c
++++ b/src/cfg.c
+@@ -373,6 +373,8 @@ static void clear_options(struct options_st *options)
+ 	for (size_t i = 0; i < options->length; i++) {
+ 		clear_option(&options->data[i]);
+ 	}
++	free(options->data);
++	memset(options, 0, sizeof(struct options_st));
+ }
+ 
+ cfg_option_t cfg_load(const char *filename)
+-- 
+2.53.0
+
