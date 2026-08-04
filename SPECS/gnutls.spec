@@ -13,7 +13,7 @@ print(string.sub(hash, 0, 16))
 }
 
 Version: 3.8.10
-Release: 4%{?dist}
+Release: 8%{?dist}
 # not upstreamed
 Patch: gnutls-3.2.7-rpath.patch
 Patch: gnutls-3.7.2-enable-intel-cet.patch
@@ -32,8 +32,6 @@ Patch: gnutls-3.8.10-tests-ktls.patch
 # reverts
 # * e52c7ca885 pkcs12: enable PBMAC1 by default in FIPS mode
 Patch: gnutls-3.8.10-rhel9-revert-pbmac1-fips-default.patch
-# * da1df0a31 fips: Allow SigVer only with RSA keys with modulus >= 2048 bits
-Patch: gnutls-3.8.10-rhel9-revert-rsa-less-than-2048.patch
 
 # CVE fixes backported from 3.8.12 release
 # upstreamed: https://gitlab.com/gnutls/gnutls/-/merge_requests/2041
@@ -69,6 +67,8 @@ Patch: gnutls-3.8.10-1841-hybrid-kx-zeroize.patch
 Patch: gnutls-3.8.10-1823-cfg-clear-options.patch
 Patch: gnutls-3.8.10-1817-security-parameters.patch
 Patch: gnutls-3.8.10-1820-p11p-kdf.patch
+# https://gitlab.com/gnutls/gnutls/-/merge_requests/2100
+Patch: gnutls-3.8.10-fips-pct-hash-sign.patch
 
 %bcond_without bootstrap
 %bcond_without dane
@@ -514,6 +514,18 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
+* Wed Jul 08 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.10-8
+- Rebuild to target RHEL-9.8
+
+* Thu Jul 02 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.10-7
+- fips: Allow SigVer only with RSA keys with modulus >= 2048 bits
+
+* Fri Jun 12 2026 Daiki Ueno  <dueno@redhat.com> - 3.8.10-6
+- Fix order of previous changelog entries (RHEL-172270)
+
+* Tue Jun 9 2026 Daiki Ueno  <dueno@redhat.com> - 3.8.10-5
+- Use full hash+sign operations in pct_test (RHEL-172270)
+
 * Thu Apr 30 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.10-4
 - Fix CVE-2026-33846 (DTLS fragment reassembly, High, heap overwrite)
 - Fix CVE-2026-42009 (DTLS fragment reassembly, High, undefined behaviour)
