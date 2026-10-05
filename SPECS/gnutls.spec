@@ -13,7 +13,7 @@ print(string.sub(hash, 0, 16))
 }
 
 Version: 3.8.10
-Release: 8%{?dist}
+Release: 9%{?dist}
 # not upstreamed
 Patch: gnutls-3.2.7-rpath.patch
 Patch: gnutls-3.7.2-enable-intel-cet.patch
@@ -28,6 +28,10 @@ Patch: gnutls-3.7.6-drbg-reseed.patch
 Patch: gnutls-3.8.10-keyupdate.patch
 # * 0992505881@3.8.11: tests: distribute ktls_utils.h
 Patch: gnutls-3.8.10-tests-ktls.patch
+# * 8ace17939@3.8.14: nettle/pk: mark ML-KEM as FIPS-unapproved
+Patch: gnutls-3.8.10-fips-mlkem-unapproved.patch
+# * 7fad16dcd3@3.8.14: secrets: pass actual zeroes in _tls13_init_secret2
+Patch: gnutls-3.8.10-fips-tls13-zero-salt.patch
 
 # reverts
 # * e52c7ca885 pkcs12: enable PBMAC1 by default in FIPS mode
@@ -514,6 +518,9 @@ make check %{?_smp_mflags} GNUTLS_SYSTEM_PRIORITY_FILE=/dev/null XFAIL_TESTS="$x
 %endif
 
 %changelog
+* Mon Sep 21 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.10-9
+- Mark ML-KEM FIPS-unapproved (RHEL-250213)
+
 * Wed Jul 08 2026 Alexander Sosedkin <asosedkin@redhat.com> - 3.8.10-8
 - Rebuild to target RHEL-9.8
 
